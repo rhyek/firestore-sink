@@ -62,7 +62,7 @@ func (f *storeBuilder) set(key string, value interface{}) {
 func (f *storeBuilder) Configure(config *connector.TaskConfig) {
 	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
-		Path:        `firestore_sink_connector`,
+		Path:        `firestore_sink_connector_write_latency_microseconds`,
 		Labels:      []string{`collection`},
 		ConstLabels: map[string]string{`task`: config.TaskId},
 	})
@@ -146,15 +146,15 @@ func (f *storeBuilder) Process(records []connector.Recode) error {
 	ctx := context.Background()
 	for _, rec := range records {
 		// single collection multiple topic mapping
-		begin := time.Now()
-		store(ctx, rec, f)
-		f.latency.Observe(float64(begin.UnixNano()), nil)
+		err := f.store(ctx, rec)
+		if err != nil {
+			f.log.Error(fireStoreLogPrefix, err)
+		}
 	}
-
 	return nil
 }
 
-func store(ctx context.Context, rec connector.Recode, f *storeBuilder)  {
+func (f *storeBuilder) store(ctx context.Context, rec connector.Recode) error {
 	collection := f.get(collection)
 	if collection == nil {
 		collection = rec.Topic()
@@ -164,18 +164,21 @@ func store(ctx context.Context, rec connector.Recode, f *storeBuilder)  {
 	if col != nil {
 		collection = col
 	}
+	defer func(begin time.Time) {
+		f.latency.Observe(float64(begin.UnixNano()/10e3), map[string]string{`collection`: collection.(string)})
+	}(time.Now())
+
 	mapCol := make(map[string]interface{})
 	err := json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {
-		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not create the payload: %v", err))
-		return
+		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v", err))
 	}
 	_, _, err = f.client.Collection(collection.(string)).Add(ctx, mapCol)
 	if err != nil {
-		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not store to firestore: %v", err))
-		return
+		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
 	}
 	f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v", rec.Value().(string)))
+	return nil
 }
 
 func (f *storeBuilder) Build() (connector.Task, error) {
