@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gmbyapa/kafka-connector/connector"
+	"github.com/pickme-go/metrics"
 	"google.golang.org/api/option"
 	"strings"
 	"sync"
+	"time"
 )
 
 const topics = `topics`
@@ -40,9 +42,10 @@ func (f *FireConnector) Start() error { return nil }
 func (f *FireConnector) Stop() error  { return nil }
 
 type storeBuilder struct {
-	log    connector.Logger
-	config sync.Map
-	client *firestore.Client
+	log     connector.Logger
+	config  sync.Map
+	client  *firestore.Client
+	latency metrics.Observer
 }
 
 var fireStoreLogPrefix = `FireStore Sink`
@@ -58,6 +61,11 @@ func (f *storeBuilder) set(key string, value interface{}) {
 
 func (f *storeBuilder) Configure(config *connector.TaskConfig) {
 	f.log = config.Logger
+	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
+		Path:        `firestore_sink_connector`,
+		Labels:      []string{`collection`},
+		ConstLabels: map[string]string{`task`: config.TaskId},
+	})
 	var conf interface{}
 	conf = config.Connector.Configs[topics]
 	if conf == nil {
@@ -138,28 +146,36 @@ func (f *storeBuilder) Process(records []connector.Recode) error {
 	ctx := context.Background()
 	for _, rec := range records {
 		// single collection multiple topic mapping
-		collection := f.get(collection)
-		if collection == nil {
-			collection = rec.Topic()
-		}
-		// topic collection mapping info
-		col := f.get(rec.Topic())
-		if col != nil {
-			collection = col
-		}
-		mapCol := make(map[string]interface{})
-		err := json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
-		if err != nil {
-			return err
-		}
-		_, _, err = f.client.Collection(collection.(string)).Add(ctx, mapCol)
-		if err != nil {
-			return err
-		}
-		f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v", rec.Value().(string)))
+		begin := time.Now()
+		store(ctx, rec, f)
+		f.latency.Observe(float64(begin.UnixNano()), nil)
 	}
 
 	return nil
+}
+
+func store(ctx context.Context, rec connector.Recode, f *storeBuilder)  {
+	collection := f.get(collection)
+	if collection == nil {
+		collection = rec.Topic()
+	}
+	// topic collection mapping info
+	col := f.get(rec.Topic())
+	if col != nil {
+		collection = col
+	}
+	mapCol := make(map[string]interface{})
+	err := json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
+	if err != nil {
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not create the payload: %v", err))
+		return
+	}
+	_, _, err = f.client.Collection(collection.(string)).Add(ctx, mapCol)
+	if err != nil {
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not store to firestore: %v", err))
+		return
+	}
+	f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v", rec.Value().(string)))
 }
 
 func (f *storeBuilder) Build() (connector.Task, error) {
