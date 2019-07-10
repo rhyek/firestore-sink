@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/gmbyapa/kafka-connector/connector"
+	"github.com/pickme-go/log"
 	"testing"
 	"time"
 )
@@ -27,13 +28,14 @@ const collections = `firestore.collections`
 */
 func TestFireStore_Sink(t *testing.T) {
 	sink, _ := Task.Build()
-	config := new(connector.Config)
-	config.Configs = make(map[string]interface{})
-	config.Configs[`firestore.credentials.file.path`] = `/home/noel/Dev/go_projects/src/github.com/noelyahan/kafka-connect/kafka-connect-firestore/test-budget-4f14aad07b9b.json`
-	config.Configs[`firestore.project.id`] = `test-budget-5529f`
-	config.Configs[`firestore.collection`] = `firesink`
-	config.Configs[`topics`] = `userTopic,blah-t`
-	config.Configs[`firestore.collection.userTopic`] = `students`
+	config := new(connector.TaskConfig)
+	config.Logger = log.NewPrefixedNoopLogger()
+	config.Connector.Configs = make(map[string]interface{})
+	config.Connector.Configs[`firestore.credentials.file.path`] = `/home/noel/Dev/go_projects/src/github.com/noelyahan/kafka-connect/kafka-connect-firestore/test-budget-4f14aad07b9b.json`
+	config.Connector.Configs[`firestore.project.id`] = `test-budget-5529f`
+	config.Connector.Configs[`firestore.collection`] = `firesink`
+	config.Connector.Configs[`topics`] = `userTopic,blah-t`
+	config.Connector.Configs[`firestore.collection.userTopic`] = `students`
 	sink.Configure(config)
 	sink.Init()
 	recs := make([]connector.Recode, 0)
@@ -45,5 +47,5 @@ func TestFireStore_Sink(t *testing.T) {
 		r := rec{`userTopic`, ``, `{"first":"Noel","last":"Yahan","born":1815}`}
 		recs = append(recs, r)
 	}
-	sink.Process(recs)
+	sink.(connector.SinkTask).Process(recs)
 }

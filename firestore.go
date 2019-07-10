@@ -11,12 +11,11 @@ import (
 	"sync"
 )
 
-const topics  = `topics`
+const topics = `topics`
 const credentialsFilePath = `firestore.credentials.file.path`
 const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
 const collection = `firestore.collection`
-const collections = `firestore.collections`
 
 var Connector connector.Connector = new(FireConnector)
 
@@ -38,12 +37,12 @@ func (f *FireConnector) Type() connector.ConnectType {
 	return connector.ConnectTypeSink
 }
 func (f *FireConnector) Start() error { return nil }
-func (f *FireConnector) Stop() error { return nil }
+func (f *FireConnector) Stop() error  { return nil }
 
 type storeBuilder struct {
-	log connector.Logger
-	config  sync.Map
-	client  *firestore.Client
+	log    connector.Logger
+	config sync.Map
+	client *firestore.Client
 }
 
 var fireStoreLogPrefix = `FireStore Sink`
@@ -104,7 +103,7 @@ func (f *storeBuilder) Init() error {
 	credFileJSON := f.get(credentialsFileJson)
 	if credFilePath != nil {
 		opt = option.WithCredentialsFile(credFilePath.(string))
-	}else if credFileJSON != nil {
+	} else if credFileJSON != nil {
 		b, err := json.Marshal(credFileJSON)
 		if err != nil {
 			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("canot convert json firestore credentials"))
@@ -163,6 +162,6 @@ func (f *storeBuilder) Process(records []connector.Recode) error {
 	return nil
 }
 
-func (f *storeBuilder) Build() (connector.Task, error)  {
+func (f *storeBuilder) Build() (connector.Task, error) {
 	return new(storeBuilder), nil
 }
