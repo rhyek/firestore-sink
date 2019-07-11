@@ -165,7 +165,7 @@ func (f *storeBuilder) store(ctx context.Context, rec connector.Recode) error {
 		collection = col
 	}
 	defer func(begin time.Time) {
-		f.latency.Observe(float64(begin.UnixNano()/10e3), map[string]string{`collection`: collection.(string)})
+		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collection`: collection.(string)})
 	}(time.Now())
 
 	mapCol := make(map[string]interface{})
