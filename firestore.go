@@ -18,6 +18,7 @@ const credentialsFilePath = `firestore.credentials.file.path`
 const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
 const collection = `firestore.collection`
+const pkMode = `firestore.topic.pk.collections`
 
 var Connector connector.Connector = new(FireConnector)
 
@@ -103,6 +104,15 @@ func (f *storeBuilder) Configure(config *connector.TaskConfig) {
 			f.set(t, col.(string))
 		}
 	}
+
+	conf = config.Connector.Configs[pkMode]
+	if conf == nil {
+		return
+	}
+	pkCols := strings.Split(conf.(string), ",")
+	for _, c := range pkCols {
+		f.set(c, struct {}{})
+	}
 }
 func (f *storeBuilder) Init() error {
 	ctx := context.Background()
@@ -172,6 +182,14 @@ func (f *storeBuilder) store(ctx context.Context, rec connector.Recode) error {
 	err := json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {
 		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v", err))
+	}
+
+	pkCol := f.get(collection.(string))
+	if pkCol != nil {
+		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Create(ctx, mapCol)
+		if err != nil {
+			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
+		}
 	}
 	_, _, err = f.client.Collection(collection.(string)).Add(ctx, mapCol)
 	if err != nil {
