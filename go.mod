@@ -1,10 +1,11 @@
 module github.com/noelyahan/kafka-connect-firestore
 
-go 1.12
+go 1.12.7
 
 require (
-	cloud.google.com/go v0.41.0
-	github.com/gmbyapa/kafka-connector v0.0.1-beta.0.20190711092410-7c958c4bc155
-	github.com/pickme-go/metrics v1.0.3
+	bitbucket.org/mybudget-dev/stream-connect-worker v0.0.0-20190729181451-2bac84d907cc
+	cloud.google.com/go v0.43.0
+	github.com/pickme-go/log v0.0.0-20190728170724-c4afde9591cd
+	github.com/pickme-go/metrics v0.0.0-20190728171738-15b951580a8e
 	google.golang.org/api v0.7.0
 )

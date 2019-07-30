@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bitbucket.org/mybudget-dev/stream-connect-worker/connector"
 	"cloud.google.com/go/firestore"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/gmbyapa/kafka-connector/connector"
 	"github.com/pickme-go/metrics"
 	"google.golang.org/api/option"
 	"strings"
@@ -19,29 +19,27 @@ const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
 const collection = `firestore.collection`
 
-var Connector connector.Connector = new(FireConnector)
+var Connector connector.Connector = new(fireConnector)
 
-var Task connector.TaskBuilder = new(storeBuilder)
+type fireConnector struct{}
 
-type FireConnector struct {
-}
-
-func (f *FireConnector) Init(configs *connector.Config) error {
-
+func (f *fireConnector) Init(configs *connector.Config) error {
 	return nil
 }
-func (f *FireConnector) Pause() error { return nil }
-func (f *FireConnector) Name() string {
+
+func (f *fireConnector) Name() string {
 	return `firestore-connector`
 }
-func (f *FireConnector) Resume() error { return nil }
-func (f *FireConnector) Type() connector.ConnectType {
+
+func (f *fireConnector) Type() connector.ConnectType {
 	return connector.ConnectTypeSink
 }
-func (f *FireConnector) Start() error { return nil }
-func (f *FireConnector) Stop() error  { return nil }
 
-type storeBuilder struct {
+func (f *fireConnector) Builder() connector.TaskBuilder {
+	return new(taskBuilder)
+}
+
+type task struct {
 	log     connector.Logger
 	config  sync.Map
 	client  *firestore.Client
@@ -50,16 +48,16 @@ type storeBuilder struct {
 
 var fireStoreLogPrefix = `FireStore Sink`
 
-func (f *storeBuilder) get(key string) interface{} {
+func (f *task) get(key string) interface{} {
 	res, _ := f.config.Load(key)
 	return res
 }
 
-func (f *storeBuilder) set(key string, value interface{}) {
+func (f *task) set(key string, value interface{}) {
 	f.config.Store(key, value)
 }
 
-func (f *storeBuilder) Configure(config *connector.TaskConfig) {
+func (f *task) configure(config *connector.TaskConfig) {
 	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
 		Path:        `firestore_sink_connector_write_latency_microseconds`,
@@ -104,7 +102,8 @@ func (f *storeBuilder) Configure(config *connector.TaskConfig) {
 		}
 	}
 }
-func (f *storeBuilder) Init() error {
+func (f *task) Init(config *connector.TaskConfig) error {
+	f.configure(config)
 	ctx := context.Background()
 	var opt option.ClientOption
 	credFilePath := f.get(credentialsFilePath)
@@ -128,10 +127,10 @@ func (f *storeBuilder) Init() error {
 	f.client = client
 	return nil
 }
-func (f *storeBuilder) Start() error {
+func (f *task) Start() error {
 	return nil
 }
-func (f *storeBuilder) Stop() error {
+func (f *task) Stop() error {
 	err := f.client.Close()
 	if err != nil {
 		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("error on closinf the client: %v", err))
@@ -140,21 +139,23 @@ func (f *storeBuilder) Stop() error {
 	return nil
 }
 
-func (f *storeBuilder) OnRebalanced() connector.ReBalanceHandler { return nil }
+func (f *task) OnRebalanced() connector.ReBalanceHandler { return nil }
 
-func (f *storeBuilder) Process(records []connector.Recode) error {
+func (f *task) Process(records []connector.Recode) error {
 	ctx := context.Background()
 	for _, rec := range records {
 		// single collection multiple topic mapping
 		err := f.store(ctx, rec)
 		if err != nil {
 			f.log.Error(fireStoreLogPrefix, err)
+			continue
 		}
+		f.log.Trace(`record batch processed`, records)
 	}
 	return nil
 }
 
-func (f *storeBuilder) store(ctx context.Context, rec connector.Recode) error {
+func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	collection := f.get(collection)
 	if collection == nil {
 		collection = rec.Topic()
@@ -181,6 +182,6 @@ func (f *storeBuilder) store(ctx context.Context, rec connector.Recode) error {
 	return nil
 }
 
-func (f *storeBuilder) Build() (connector.Task, error) {
-	return new(storeBuilder), nil
+func (f *task) Name() string {
+	return `firestore-sink-task`
 }
