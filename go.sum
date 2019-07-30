@@ -1,5 +1,3 @@
-bitbucket.org/mybudget-dev/stream-connect-worker v0.0.0-20190729170618-b50d1c26782b h1:dwZYQqBIuM5XjXwmQD9xz0nvW3cZdu52VgckjAc92o8=
-bitbucket.org/mybudget-dev/stream-connect-worker v0.0.0-20190729170618-b50d1c26782b/go.mod h1:t1Aa3KB9CQyu5IoXh7b3yegaL7zYEW2vUid3V/ZQnoA=
 bitbucket.org/mybudget-dev/stream-connect-worker v0.0.0-20190729181451-2bac84d907cc h1:fXWuMxRmt89oTBVL1WJuH+OosMr+p1TOnvAcefL3ofQ=
 bitbucket.org/mybudget-dev/stream-connect-worker v0.0.0-20190729181451-2bac84d907cc/go.mod h1:rd/i+KwUUahTY8F5FNMwwFs+Z6WrNiigJP0YwbLeTMs=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
