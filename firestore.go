@@ -20,6 +20,7 @@ const projectId = `firestore.project.id`
 const collection = `firestore.collection`
 const pkMode = `firestore.topic.pk.collections`
 
+
 var Connector connector.Connector = new(fireConnector)
 
 type fireConnector struct{}
