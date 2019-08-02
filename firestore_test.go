@@ -31,10 +31,11 @@ func TestFireStore_Sink(t *testing.T) {
 	config.Connector.Configs = make(map[string]interface{})
 	config.Connector.Configs[`firestore.credentials.file.path`] = `/home/noel/Dev/go_projects/src/github.com/noelyahan/kafka-connect/kafka-connect-firestore/test-budget-4f14aad07b9b.json`
 	config.Connector.Configs[`firestore.project.id`] = `test-budget-5529f`
-	config.Connector.Configs[`firestore.collection`] = `firesink`
+	//config.Connector.Configs[`firestore.collection`] = `firesink`
 	config.Connector.Configs[`topics`] = `userTopic,blah-t`
 	config.Connector.Configs[`firestore.collection.userTopic`] = `students`
 	config.Connector.Configs[`firestore.topic.pk.collections`] = `students`
+	config.Connector.Configs[`firestore.students.sub.collection`] = `students2`
 	sink.Init(config)
 	recs := make([]connector.Recode, 0)
 	recs = append(recs, rec{`userTopic`, `1sadasd-dasdasd`, `{"first":"Noel","last":"Yahan","born":1815}`})

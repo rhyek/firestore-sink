@@ -23,6 +23,9 @@ Topic collection mapping<br>
 If collection wants to use topic primary key as the collection PK<br>
 ``` "firestore.topic.pk.collections": "col1,col2" ```<br />
 
+If collection wants organize data with sub collection <br>
+``` "firestore.col1.sub.collection": "col3" ```<br />
+
 Sample Connector Payload
 ```
 {

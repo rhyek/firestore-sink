@@ -19,6 +19,7 @@ const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
 const collection = `firestore.collection`
 const pkMode = `firestore.topic.pk.collections`
+const subCollection = `firestore.%s.sub.collection`
 
 
 var Connector connector.Connector = new(fireConnector)
@@ -101,6 +102,11 @@ func (f *task) configure(config *connector.TaskConfig) {
 		col := config.Connector.Configs[key]
 		if col != nil {
 			f.set(t, col.(string))
+			key = fmt.Sprintf(subCollection, col.(string))
+			subCol := config.Connector.Configs[key]
+			if subCol != nil {
+				f.set(key, subCol)
+			}
 		}
 	}
 
@@ -186,14 +192,29 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v", err))
 	}
 
+	subCol := f.get(fmt.Sprintf(subCollection, collection.(string)))
+
+
 	pkCol := f.get(collection.(string))
 	if pkCol != nil {
+		// sub collection
+		if subCol != nil {
+			_, _, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", subCol)).Collection(fmt.Sprintf("%v", rec.Key())).Add(ctx, mapCol)
+			if err != nil {
+				return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
+			}
+			return nil
+		}
+
+		// default
 		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Create(ctx, mapCol)
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
 		}
 		return nil
 	}
+
+	// default
 	_, _, err = f.client.Collection(collection.(string)).Add(ctx, mapCol)
 	if err != nil {
 		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
