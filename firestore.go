@@ -207,7 +207,8 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		}
 
 		// default
-		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Create(ctx, mapCol)
+		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
+
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
 		}
@@ -215,7 +216,7 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	}
 
 	// default
-	_, _, err = f.client.Collection(collection.(string)).Add(ctx, mapCol)
+	_, err = f.client.Collection(collection.(string)).NewDoc().Set(ctx, mapCol)
 	if err != nil {
 		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
 	}

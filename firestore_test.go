@@ -35,16 +35,22 @@ func TestFireStore_Sink(t *testing.T) {
 	config.Connector.Configs[`topics`] = `userTopic,blah-t`
 	config.Connector.Configs[`firestore.collection.userTopic`] = `students`
 	config.Connector.Configs[`firestore.topic.pk.collections`] = `students`
-	config.Connector.Configs[`firestore.students.sub.collection`] = `students2`
-	sink.Init(config)
+	//config.Connector.Configs[`firestore.students.sub.collection`] = `students2`
+	err := sink.Init(config)
+	if err != nil {
+		t.Fatal(err)
+	}
 	recs := make([]connector.Recode, 0)
-	recs = append(recs, rec{`userTopic`, `1sadasd-dasdasd`, `{"first":"Noel","last":"Yahan","born":1815}`})
-	recs = append(recs, rec{`userTopic`, `1232313-123123`, `{"first":"Noel","last":"Yahan","born":1815}`})
-	recs = append(recs, rec{`userTopic`, `3123123-21312`, `{"first":"Noel","last":"Yahan","born":1815}`})
+	recs = append(recs, rec{`userTopic`, `one`, `{"first":"Test 1","last":"Test","born":1815}`})
+	recs = append(recs, rec{`userTopic`, `two`, `{"first":"Test 2","last":"Test","born":1815}`})
+	recs = append(recs, rec{`userTopic`, `three`, `{"first":"Test 3","last":"Test","born":1815}`})
 
 	//for i := 0; i < 3; i++ {
 	//	r := rec{`userTopic`, ``, `{"first":"Noel","last":"Yahan","born":1815}`}
 	//	recs = append(recs, r)
 	//}
-	sink.(connector.SinkTask).Process(recs)
+	err = sink.(connector.SinkTask).Process(recs)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
