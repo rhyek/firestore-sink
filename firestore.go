@@ -97,6 +97,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	topics := strings.Split(config.Connector.Configs[topics].(string), ",")
 
 	for _, t := range topics {
+		t = strings.Replace(t, " ", "", -1)
 		key := fmt.Sprintf(`%v.%v`, collection, t)
 		col := config.Connector.Configs[key]
 		if col != nil {
