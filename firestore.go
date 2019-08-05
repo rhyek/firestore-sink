@@ -17,7 +17,6 @@ const topics = `topics`
 const credentialsFilePath = `firestore.credentials.file.path`
 const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
-const collection = `firestore.collection`
 const pkMode = `firestore.topic.pk.collections`
 
 
@@ -63,7 +62,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
 		Path:        `firestore_sink_connector_write_latency_microseconds`,
-		Labels:      []string{`collection`},
+		Labels:      []string{`collections`},
 		ConstLabels: map[string]string{`task`: config.TaskId},
 	})
 	var conf interface{}
@@ -91,14 +90,12 @@ func (f *task) configure(config *connector.TaskConfig) {
 	}
 	f.set(projectId, conf)
 
-	f.set(collection, config.Connector.Configs[collection])
-
-	// topics and collection mapping - optional
+	// topics and collections mapping - optional
 	topics := strings.Split(config.Connector.Configs[topics].(string), ",")
 
 	for _, t := range topics {
 		t = strings.Replace(t, " ", "", -1)
-		key := fmt.Sprintf(`%v.%v`, collection, t)
+		key := fmt.Sprintf(`%v.%v`, `firestore.collection`, t)
 		col := config.Connector.Configs[key]
 		if col != nil {
 			f.set(t, strings.Replace(col.(string), ".", "/", -1))
@@ -111,7 +108,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	}
 	pkCols := strings.Split(conf.(string), ",")
 	for _, c := range pkCols {
-		f.set(strings.Replace(c, ".", "/", -1), struct {}{})
+		f.set(fmt.Sprintf(`pk.%s`, strings.Replace(c, ".", "/", -1)), struct {}{})
 	}
 }
 func (f *task) Init(config *connector.TaskConfig) error {
@@ -156,7 +153,7 @@ func (f *task) OnRebalanced() connector.ReBalanceHandler { return nil }
 func (f *task) Process(records []connector.Recode) error {
 	ctx := context.Background()
 	for _, rec := range records {
-		// single collection multiple topic mapping
+		// single collections multiple topic mapping
 		err := f.store(ctx, rec)
 		if err != nil {
 			f.log.Error(fireStoreLogPrefix, err, rec.Key(), rec.Value())
@@ -168,43 +165,41 @@ func (f *task) Process(records []connector.Recode) error {
 }
 
 func (f *task) store(ctx context.Context, rec connector.Recode) error {
-	collection := f.get(collection)
+	// topic collections mapping info
+	var err error
+	collection := f.get(rec.Topic())
 	if collection == nil {
-		collection = rec.Topic()
-	}
-	// topic collection mapping info
-	col := f.get(rec.Topic())
-	if col != nil {
-		collection = col
+		err = fmt.Errorf("firestore collection not found \n")
+		return err
 	}
 	defer func(begin time.Time) {
-		if collection == nil {
-			collection = `nil`
+		if err != nil {
+			return
 		}
-		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collection`: collection.(string)})
+		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collections`: collection.(string)})
 	}(time.Now())
 
 	mapCol := make(map[string]interface{})
-	err := json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
+	err = json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {
-		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v", err))
+		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
 
-	pkCol := f.get(collection.(string))
+	pkCol := f.get(fmt.Sprintf(`pk.%s`, collection.(string)))
 	if pkCol != nil {
 		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
 
 		if err != nil {
-			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
+			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 		}
 		return nil
 	}
 
 	_, err = f.client.Collection(collection.(string)).NewDoc().Set(ctx, mapCol)
 	if err != nil {
-		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
+		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
-	f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v", rec.Value().(string)))
+	f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	return nil
 }
 
