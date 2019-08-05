@@ -159,7 +159,7 @@ func (f *task) Process(records []connector.Recode) error {
 		// single collection multiple topic mapping
 		err := f.store(ctx, rec)
 		if err != nil {
-			f.log.Error(fireStoreLogPrefix, err)
+			f.log.Error(fireStoreLogPrefix, err, rec.Key(), rec.Value())
 			continue
 		}
 		f.log.Trace(`record batch processed`, records)
@@ -178,6 +178,9 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		collection = col
 	}
 	defer func(begin time.Time) {
+		if collection == nil {
+			collection = `nil`
+		}
 		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collection`: collection.(string)})
 	}(time.Now())
 
