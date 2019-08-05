@@ -33,21 +33,21 @@ func TestFireStore_Sink(t *testing.T) {
 	config.Connector.Configs[`firestore.project.id`] = `test-budget-5529f`
 	//config.Connector.Configs[`firestore.collections`] = `firesink`
 	config.Connector.Configs[`topics`] = `activity_log,blah-t`
-	config.Connector.Configs[`firestore.collection.activity_log`] = `activity_log`
-	config.Connector.Configs[`firestore.topic.pk.collections`] = `activity_log`
+	config.Connector.Configs[`firestore.collection.activity_log`] = `hello/world/activity_log`
+	config.Connector.Configs[`firestore.topic.pk.collections`] = `hello/world/activity_log`
 	err := sink.Init(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	recs := make([]connector.Recode, 0)
-	recs = append(recs, rec{`activity_log`, `one`, `{"first":"Test 11","last":"Test","born":1815}`})
-	recs = append(recs, rec{`activity_log`, `two`, `{"first":"Test 22","last":"Test","born":1815}`})
-	recs = append(recs, rec{`activity_log`, `three`, `{"first":"Test 33","last":"Test","born":1815}`})
+	recs = append(recs, rec{`activity_log`, `one`, `{"first":"Test 1","last":"Test","born":1815}`})
+	recs = append(recs, rec{`activity_log`, `two`, `{"first":"Test 2","last":"Test","born":1815}`})
+	recs = append(recs, rec{`activity_log`, `three`, `{"first":"Test 3","last":"Test","born":1815}`})
 
 	//for i := 0; i < 3; i++ {
 	//	r := rec{`userTopic`, ``, `{"first":"Noel","last":"Yahan","born":1815}`}
 	//	recs = append(recs, r)
-	//}
+	//}firestore: nil DocumentRef
 	err = sink.(connector.SinkTask).Process(recs)
 	if err != nil {
 		t.Fatal(err)

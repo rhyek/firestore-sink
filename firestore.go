@@ -96,9 +96,10 @@ func (f *task) configure(config *connector.TaskConfig) {
 	for _, t := range topics {
 		t = strings.Replace(t, " ", "", -1)
 		key := fmt.Sprintf(`%v.%v`, `firestore.collection`, t)
+
 		col := config.Connector.Configs[key]
 		if col != nil {
-			f.set(t, strings.Replace(col.(string), ".", "/", -1))
+			f.set(t, col.(string))
 		}
 	}
 
@@ -108,7 +109,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	}
 	pkCols := strings.Split(conf.(string), ",")
 	for _, c := range pkCols {
-		f.set(fmt.Sprintf(`pk.%s`, strings.Replace(c, ".", "/", -1)), struct {}{})
+		f.set(fmt.Sprintf(`pk/%s`, c), struct {}{})
 	}
 }
 func (f *task) Init(config *connector.TaskConfig) error {
@@ -185,7 +186,7 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
 
-	pkCol := f.get(fmt.Sprintf(`pk.%s`, collection.(string)))
+	pkCol := f.get(fmt.Sprintf(`pk/%s`, collection.(string)))
 	if pkCol != nil {
 		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
 
@@ -195,7 +196,8 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		return nil
 	}
 
-	_, err = f.client.Collection(collection.(string)).NewDoc().Set(ctx, mapCol)
+	_, err = f.client.Collection(collection.(string)).NewDoc().Create(ctx, mapCol)
+
 	if err != nil {
 		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
