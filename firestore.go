@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pickme-go/metrics"
+	"github.com/tidwall/gjson"
 	"google.golang.org/api/option"
 	"strings"
 	"sync"
@@ -18,7 +19,6 @@ const credentialsFilePath = `firestore.credentials.file.path`
 const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
 const pkMode = `firestore.topic.pk.collections`
-
 
 var Connector connector.Connector = new(fireConnector)
 
@@ -109,7 +109,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	}
 	pkCols := strings.Split(conf.(string), ",")
 	for _, c := range pkCols {
-		f.set(fmt.Sprintf(`pk/%s`, c), struct {}{})
+		f.set(fmt.Sprintf(`pk/%s`, c), struct{}{})
 	}
 }
 func (f *task) Init(config *connector.TaskConfig) error {
@@ -168,16 +168,16 @@ func (f *task) Process(records []connector.Recode) error {
 func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	// topic collections mapping info
 	var err error
-	collection := f.get(rec.Topic())
-	if collection == nil {
-		err = fmt.Errorf("firestore collection not found \n")
+	col := f.get(rec.Topic())
+	if col == nil {
+		err = fmt.Errorf("firestore col not found \n")
 		return err
 	}
 	defer func(begin time.Time) {
 		if err != nil {
 			return
 		}
-		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collections`: collection.(string)})
+		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collections`: col.(string)})
 	}(time.Now())
 
 	mapCol := make(map[string]interface{})
@@ -186,9 +186,25 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
 
-	pkCol := f.get(fmt.Sprintf(`pk/%s`, collection.(string)))
-	if pkCol != nil {
-		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
+	paths := strings.Split(col.(string), "/")
+
+	pkCol := f.get(fmt.Sprintf(`pk/%s`, col.(string)))
+	// replace col path template from payload path
+	col = f.getCollPath(paths, rec.Value().(string))
+
+	// replace primary key for the template
+	if strings.Contains(col.(string), "${pk}") {
+		col = strings.Replace(col.(string), "${pk}", rec.Key().(string), -1)
+	}
+
+	colRef, docRef := f.getPathRefs(paths)
+
+	// if pk available or not
+	if len(paths)%2 == 0 {
+		if docRef == nil {
+			return fmt.Errorf("cannot create firestore col for: %v", col)
+		}
+		_, err = docRef.Set(ctx, mapCol)
 
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
@@ -196,13 +212,54 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		return nil
 	}
 
-	_, err = f.client.Collection(collection.(string)).NewDoc().Create(ctx, mapCol)
+	// if pk available
+	if pkCol != nil {
+		_, err = colRef.Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
+
+		if err != nil {
+			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+		}
+		return nil
+	}
+
+	//if pk not available
+	_, err = f.client.Collection(col.(string)).NewDoc().Create(ctx, mapCol)
 
 	if err != nil {
 		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
 	f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	return nil
+}
+
+func (f *task) getCollPath(paths []string, value string) string {
+	for i, v := range paths {
+		if strings.Contains(v, `$`) {
+			paths[i] = strings.NewReplacer("$", "", "{", "", "}", "").Replace(v)
+			paths[i] = gjson.Get(value, paths[i]).String()
+		}
+	}
+	return strings.Join(paths, "/")
+}
+func (f *task) getPathRefs(paths []string) (colRef *firestore.CollectionRef, docRef *firestore.DocumentRef) {
+	for i, p := range paths {
+		if i%2 == 0 {
+			if colRef == nil {
+				colRef = f.client.Collection(p)
+			} else {
+				if docRef == nil {
+					continue
+				}
+				colRef = docRef.Collection(p)
+			}
+		} else {
+			if colRef == nil {
+				continue
+			}
+			docRef = colRef.Doc(p)
+		}
+	}
+	return
 }
 
 func (f *task) Name() string {
