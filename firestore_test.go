@@ -40,8 +40,8 @@ func TestFireStore_Sink(t *testing.T) {
 	}
 	recs := make([]connector.Recode, 0)
 	recs = append(recs, rec{`account`, `111`, `{"first":"Test 11","last":"Test","born":1111,"account_id":"a111","goal_id":"g111"}`})
-	recs = append(recs, rec{`account`, `222`, `{"first":"Test 2","last":"Test","born":1815,"account_id":"a111","goal_id":"g222"}`})
-	recs = append(recs, rec{`account`, `333`, `{"first":"Test 3","last":"Test","born":1815,"account_id":"a111","goal_id":"g333"}`})
+	//recs = append(recs, rec{`account`, `222`, `{"first":"Test 2","last":"Test","born":1815,"account_id":"a111","goal_id":"g222"}`})
+	//recs = append(recs, rec{`account`, `333`, `{"first":"Test 3","last":"Test","born":1815,"account_id":"a111","goal_id":"g333"}`})
 
 	//for i := 0; i < 3; i++ {
 	//	r := rec{`userTopic`, ``, `{"first":"Noel","last":"Yahan","born":1815}`}
@@ -57,6 +57,8 @@ func TestFireConnector_GetCollectionPath(t *testing.T) {
 	col := `accounts/${id}/goals`
 	val := `{"first":"Test 11","last":"Test","born":1111,"id":"a111"}`
 	arr := strings.Split(col, "/")
+	t.Log(arr)
 	res := new(task).getCollPath(arr, val)
 	t.Log(res)
+	t.Log(arr)
 }
