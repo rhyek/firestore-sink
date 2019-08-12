@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pickme-go/metrics"
+	"github.com/tidwall/gjson"
 	"google.golang.org/api/option"
 	"strings"
 	"sync"
@@ -17,13 +18,13 @@ const topics = `topics`
 const credentialsFilePath = `firestore.credentials.file.path`
 const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
-const collection = `firestore.collection`
 const pkMode = `firestore.topic.pk.collections`
-
 
 var Connector connector.Connector = new(fireConnector)
 
 type fireConnector struct{}
+
+var replacer = strings.NewReplacer("$", "", "{", "", "}", "")
 
 func (f *fireConnector) Init(configs *connector.Config) error {
 	return nil
@@ -63,7 +64,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
 		Path:        `firestore_sink_connector_write_latency_microseconds`,
-		Labels:      []string{`collection`},
+		Labels:      []string{`collections`},
 		ConstLabels: map[string]string{`task`: config.TaskId},
 	})
 	var conf interface{}
@@ -86,22 +87,21 @@ func (f *task) configure(config *connector.TaskConfig) {
 
 	conf = config.Connector.Configs[projectId]
 	if conf == nil {
-		msg := fmt.Sprintf(`%v conifig canot be empty`, projectId)
+		msg := fmt.Sprintf(`%v conifig could not be empty`, projectId)
 		f.log.Error(fireStoreLogPrefix, msg)
 	}
 	f.set(projectId, conf)
 
-	f.set(collection, config.Connector.Configs[collection])
-
-	// topics and collection mapping - optional
+	// topics and collections mapping - optional
 	topics := strings.Split(config.Connector.Configs[topics].(string), ",")
 
 	for _, t := range topics {
 		t = strings.Replace(t, " ", "", -1)
-		key := fmt.Sprintf(`%v.%v`, collection, t)
+		key := fmt.Sprintf(`%v.%v`, `firestore.collection`, t)
+
 		col := config.Connector.Configs[key]
 		if col != nil {
-			f.set(t, strings.Replace(col.(string), ".", "/", -1))
+			f.set(t, col.(string))
 		}
 	}
 
@@ -111,7 +111,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	}
 	pkCols := strings.Split(conf.(string), ",")
 	for _, c := range pkCols {
-		f.set(strings.Replace(c, ".", "/", -1), struct {}{})
+		f.set(fmt.Sprintf(`pk/%s`, c), struct{}{})
 	}
 }
 func (f *task) Init(config *connector.TaskConfig) error {
@@ -125,15 +125,18 @@ func (f *task) Init(config *connector.TaskConfig) error {
 	} else if credFileJSON != nil {
 		b, err := json.Marshal(credFileJSON)
 		if err != nil {
-			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("canot convert json firestore credentials"))
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not convert json firestore credentials"))
 			return err
 		}
 		opt = option.WithCredentialsJSON(b)
 	}
+	if opt == nil {
+		opt = option.WithoutAuthentication()
+	}
 	projectId := f.get(projectId).(string)
 	client, err := firestore.NewClient(ctx, projectId, opt)
 	if err != nil {
-		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("canot connect to firestore, error on creating a client: %v", err))
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not connect to firestore, error on creating a client: %v", err))
 		return err
 	}
 	f.client = client
@@ -156,10 +159,10 @@ func (f *task) OnRebalanced() connector.ReBalanceHandler { return nil }
 func (f *task) Process(records []connector.Recode) error {
 	ctx := context.Background()
 	for _, rec := range records {
-		// single collection multiple topic mapping
+		// single collections multiple topic mapping
 		err := f.store(ctx, rec)
 		if err != nil {
-			f.log.Error(fireStoreLogPrefix, err)
+			f.log.Error(fireStoreLogPrefix, err, rec.Key(), rec.Value())
 			continue
 		}
 		f.log.Trace(`record batch processed`, records)
@@ -168,41 +171,100 @@ func (f *task) Process(records []connector.Recode) error {
 }
 
 func (f *task) store(ctx context.Context, rec connector.Recode) error {
-	collection := f.get(collection)
-	if collection == nil {
-		collection = rec.Topic()
-	}
-	// topic collection mapping info
+	// topic collections mapping info
+	var err error
 	col := f.get(rec.Topic())
-	if col != nil {
-		collection = col
+	if col == nil {
+		err = fmt.Errorf("firestore col not found \n")
+		return err
 	}
 	defer func(begin time.Time) {
-		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collection`: collection.(string)})
+		if col == nil {
+			return
+		}
+		f.latency.Observe(float64(time.Since(begin).Nanoseconds()/1e3), map[string]string{`collections`: col.(string)})
 	}(time.Now())
 
 	mapCol := make(map[string]interface{})
-	err := json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
+	err = json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {
-		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v", err))
+		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
 
-	pkCol := f.get(collection.(string))
-	if pkCol != nil {
-		_, err = f.client.Collection(collection.(string)).Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
+	paths := strings.Split(col.(string), "/")
+
+	pkCol := f.get(fmt.Sprintf(`pk/%s`, col.(string)))
+	// replace col path template from payload path
+	col = f.getCollPath(paths, rec.Value().(string))
+
+	// replace primary key for the template
+	if strings.Contains(col.(string), "${pk}") {
+		col = strings.Replace(col.(string), "${pk}", rec.Key().(string), -1)
+	}
+
+	colRef, docRef := f.getPathRefs(paths)
+
+	// if pk available or not
+	if len(paths)%2 == 0 {
+		if docRef == nil {
+			return fmt.Errorf("could not create firestore col for: %v", col)
+		}
+		_, err = docRef.Set(ctx, mapCol)
 
 		if err != nil {
-			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
+			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 		}
 		return nil
 	}
 
-	_, err = f.client.Collection(collection.(string)).NewDoc().Set(ctx, mapCol)
-	if err != nil {
-		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v", err))
+	// if pk available
+	if pkCol != nil {
+		_, err = colRef.Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
+
+		if err != nil {
+			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+		}
+		return nil
 	}
-	f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v", rec.Value().(string)))
+
+	//if pk not available
+	_, err = colRef.NewDoc().Create(ctx, mapCol)
+
+	if err != nil {
+		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+	}
+	f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message insert done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	return nil
+}
+
+// getCollPath function is used to construct collection path via payload mapping "col1/${id}/col2/${name}" -> "col1/111/col2/foo"
+func (f *task) getCollPath(paths []string, value string) string {
+	for i, v := range paths {
+		if strings.Contains(v, `$`) {
+			paths[i] = replacer.Replace(v)
+			paths[i] = gjson.Get(value, paths[i]).String()
+		}
+	}
+	return strings.Join(paths, "/")
+}
+
+// getPathRefs function is used create path reference from given "col1/doc1/col2/doc2" format
+func (f *task) getPathRefs(paths []string) (colRef *firestore.CollectionRef, docRef *firestore.DocumentRef) {
+	for i, p := range paths {
+		if i%2 == 0 {
+			if colRef == nil {
+				colRef = f.client.Collection(p)
+				continue
+			}
+			if docRef != nil {
+				colRef = docRef.Collection(p)
+				continue
+			}
+			continue
+		}
+		docRef = colRef.Doc(p)
+	}
+	return
 }
 
 func (f *task) Name() string {
