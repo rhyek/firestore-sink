@@ -186,6 +186,10 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	}(time.Now())
 
 	mapCol := make(map[string]interface{})
+	// TODO remove the collection
+	if rec.Value() == nil {
+		return fmt.Errorf(fmt.Sprintf("could not continue the payload is empty: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+	}
 	err = json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {
 		return fmt.Errorf(fmt.Sprintf("could not create the payload: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
