@@ -38,6 +38,10 @@ If collection wants to use topic primary key as the collection PK
 
 * ``` "firestore.topic.pk.collections": "col1,col2,col1.col2.col3" ```
 
+If collection wants to delete on `null` value use below config, default the config is false
+
+* ``` "firestore.delete.on.null.values": true ```
+
 ## Example
 
 ### Sample Connector Payload

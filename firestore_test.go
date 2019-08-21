@@ -22,6 +22,7 @@ func (r rec) Key() interface{}     { return r.key }
 func (r rec) Value() interface{}   { return r.value }
 func (r rec) Timestamp() time.Time { return time.Now() }
 
+// TODO test it for failures
 func TestFireStore_Sink(t *testing.T) {
 	sink, _ := new(taskBuilder).Build()
 	config := new(connector.TaskConfig)
@@ -34,20 +35,32 @@ func TestFireStore_Sink(t *testing.T) {
 	config.Connector.Configs[`topics`] = `account,blah-t`
 	config.Connector.Configs[`firestore.collection.account`] = `accounts/${account_id}/goals/${goal_id}`
 	config.Connector.Configs[`firestore.topic.pk.collections`] = `accounts/${account_id}/goals/${goal_id}`
+	config.Connector.Configs[`firestore.delete.on.null.values`] = true
 	err := sink.Init(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	recs := make([]connector.Recode, 0)
-	recs = append(recs, rec{`account`, `111`, nil})
 	recs = append(recs, rec{`account`, `111`, `{"first":"Test 11","last":"Test","born":1111,"account_id":"a111","goal_id":"g111"}`})
-	//recs = append(recs, rec{`account`, `222`, `{"first":"Test 2","last":"Test","born":1815,"account_id":"a111","goal_id":"g222"}`})
-	//recs = append(recs, rec{`account`, `333`, `{"first":"Test 3","last":"Test","born":1815,"account_id":"a111","goal_id":"g333"}`})
+	recs = append(recs, rec{`account`, `222`, `{"first":"Test 2","last":"Test","born":1815,"account_id":"a111","goal_id":"g222"}`})
+	recs = append(recs, rec{`account`, `333`, `{"first":"Test 3","last":"Test","born":1815,"account_id":"a111","goal_id":"g333"}`})
 
 	//for i := 0; i < 3; i++ {
 	//	r := rec{`userTopic`, ``, `{"first":"Noel","last":"Yahan","born":1815}`}
 	//	recs = append(recs, r)
 	//}firestore: nil DocumentRef
+	err = sink.(connector.SinkTask).Process(recs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(2 * time.Second)
+	recs = append(recs, rec{`account`, `111`, nil})
+	time.Sleep(2 * time.Second)
+	recs = append(recs, rec{`account`, `222`, nil})
+	time.Sleep(2 * time.Second)
+	recs = append(recs, rec{`account`, `333`, nil})
+
 	err = sink.(connector.SinkTask).Process(recs)
 	if err != nil {
 		t.Fatal(err)

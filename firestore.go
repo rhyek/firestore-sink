@@ -19,6 +19,7 @@ const credentialsFilePath = `firestore.credentials.file.path`
 const credentialsFileJson = `firestore.credentials.file.json`
 const projectId = `firestore.project.id`
 const pkMode = `firestore.topic.pk.collections`
+const deleteOnNull = `firestore.delete.on.null.values`
 
 var Connector connector.Connector = new(fireConnector)
 
@@ -45,6 +46,7 @@ func (f *fireConnector) Builder() connector.TaskBuilder {
 type task struct {
 	log     connector.Logger
 	config  sync.Map
+	state   sync.Map
 	client  *firestore.Client
 	latency metrics.Observer
 }
@@ -58,6 +60,15 @@ func (f *task) get(key string) interface{} {
 
 func (f *task) set(key string, value interface{}) {
 	f.config.Store(key, value)
+}
+
+func (f *task) syncState(key, value interface{}) {
+	f.state.Store(key, value)
+}
+
+func (f *task) getState(key interface{}) interface{} {
+	value, _ := f.state.Load(key)
+	return value
 }
 
 func (f *task) configure(config *connector.TaskConfig) {
@@ -105,6 +116,12 @@ func (f *task) configure(config *connector.TaskConfig) {
 		}
 	}
 
+	conf = config.Connector.Configs[deleteOnNull]
+	if conf == nil {
+		f.set(deleteOnNull, false)
+	}else {
+		f.set(deleteOnNull, conf.(bool))
+	}
 	conf = config.Connector.Configs[pkMode]
 	if conf == nil {
 		return
@@ -171,6 +188,10 @@ func (f *task) Process(records []connector.Recode) error {
 }
 
 func (f *task) store(ctx context.Context, rec connector.Recode) error {
+	defer func() {
+		// sync state
+		f.syncState(rec.Key(), rec)
+	}()
 	// topic collections mapping info
 	var err error
 	col := f.get(rec.Topic())
@@ -187,8 +208,13 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 
 	mapCol := make(map[string]interface{})
 	// TODO remove the collection
+	readyToDelete := false
 	if rec.Value() == nil {
-		return fmt.Errorf(fmt.Sprintf("could not continue the payload is empty: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+		val := f.getState(rec.Key())
+		if val != nil {
+			rec = val.(connector.Recode)
+			readyToDelete = true
+		}
 	}
 	err = json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {
@@ -217,6 +243,15 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+		}
+
+		// ready to delete
+		if readyToDelete && f.get(deleteOnNull).(bool) {
+			_, err := docRef.Delete(ctx)
+			if err != nil {
+				return fmt.Errorf(fmt.Sprintf("could not delete from firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+			}
+			f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message delete done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 		}
 		return nil
 	}
