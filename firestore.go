@@ -207,7 +207,6 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	}(time.Now())
 
 	mapCol := make(map[string]interface{})
-	// TODO remove the collection
 	readyToDelete := false
 	if rec.Value() == nil {
 		val := f.getState(rec.Key())
@@ -215,6 +214,10 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 			rec = val.(connector.Recode)
 			readyToDelete = true
 		}
+	}
+	// if still previous state was empty and the first value is null cant sync
+	if rec.Value() == nil {
+		return fmt.Errorf(fmt.Sprintf("could sync the payload of null, no previous states to be mapped:, key: %v, value: %v", rec.Key(), rec.Value()))
 	}
 	err = json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {

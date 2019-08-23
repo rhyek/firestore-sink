@@ -41,6 +41,7 @@ func TestFireStore_Sink(t *testing.T) {
 		t.Fatal(err)
 	}
 	recs := make([]connector.Recode, 0)
+	recs = append(recs, rec{`account`, `111`, nil})
 	recs = append(recs, rec{`account`, `111`, `{"first":"Test 11","last":"Test","born":1111,"account_id":"a111","goal_id":"g111"}`})
 	recs = append(recs, rec{`account`, `222`, `{"first":"Test 2","last":"Test","born":1815,"account_id":"a111","goal_id":"g222"}`})
 	recs = append(recs, rec{`account`, `333`, `{"first":"Test 3","last":"Test","born":1815,"account_id":"a111","goal_id":"g333"}`})
