@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pickme-go/k-stream/consumer"
+	"github.com/pickme-go/k-stream/producer"
 	"github.com/pickme-go/metrics"
 	"github.com/tidwall/gjson"
 	"google.golang.org/api/option"
@@ -22,6 +24,22 @@ const pkMode = `firestore.topic.pk.collections`
 const deleteOnNull = `firestore.delete.on.null.values`
 
 var Connector connector.Connector = new(fireConnector)
+
+type record struct {
+	Topic_     string      `json:"topic"`
+	Partition_ int32       `json:"partition"`
+	Offset_    int64       `json:"offset"`
+	Key_       interface{} `json:"key"`
+	Value_     interface{} `json:"value"`
+	Timestamp_ time.Time   `json:"timestamp"`
+}
+
+func (r record) Topic() string        { return r.Topic_ }
+func (r record) Partition() int32     { return r.Partition_ }
+func (r record) Offset() int64        { return r.Offset_ }
+func (r record) Key() interface{}     { return r.Key_ }
+func (r record) Value() interface{}   { return r.Value_ }
+func (r record) Timestamp() time.Time { return r.Timestamp_ }
 
 type fireConnector struct{}
 
@@ -44,11 +62,15 @@ func (f *fireConnector) Builder() connector.TaskBuilder {
 }
 
 type task struct {
-	log     connector.Logger
-	config  sync.Map
-	state   sync.Map
-	client  *firestore.Client
-	latency metrics.Observer
+	log       connector.Logger
+	config    sync.Map
+	state     sync.Map
+	client    *firestore.Client
+	latency   metrics.Observer
+	syncTopic string
+	signal    chan struct{}
+	producer  producer.Producer
+	consumer  consumer.PartitionConsumer
 }
 
 var fireStoreLogPrefix = `FireStore Sink`
@@ -71,7 +93,72 @@ func (f *task) getState(key interface{}) interface{} {
 	return value
 }
 
+func (f *task) consumeStates() {
+	messages, err := f.consumer.Consume(f.syncTopic, 0, 0)
+	if err != nil {
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync data from kafka: %v", err))
+	}
+
+	for message := range messages {
+		switch m := message.(type) {
+		case *consumer.PartitionEnd:
+			return
+		case *consumer.Record:
+			var key interface{}
+			err := json.Unmarshal(m.Key, &key)
+			if err != nil {
+				f.log.Error(fireStoreLogPrefix, fmt.Sprintf("error on decoding key: %v", err))
+				continue
+			}
+
+			var rec record
+			err = json.Unmarshal(m.Value, &rec)
+			if err != nil {
+				f.log.Error(fireStoreLogPrefix, fmt.Sprintf("error on decoding key: %v", err))
+				continue
+			}
+			f.syncState(key, rec)
+		}
+	}
+}
+
+func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
+	if rec == nil {
+		return fmt.Errorf("incomming record is nil")
+	}
+	r := record{rec.Topic(), rec.Partition(),
+		rec.Offset(), rec.Key(), rec.Value(), rec.Timestamp()}
+
+	key, err := json.Marshal(r.Key_)
+	if err != nil {
+		return err
+	}
+
+	value, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	if f.producer != nil {
+		_, _, err = f.producer.Produce(ctx, &consumer.Record{
+			Key:   key,
+			Value: value,
+			Topic: f.syncTopic,
+		})
+		if err != nil {
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not produce sync data: %+v, err: %v", rec, err))
+		}
+	}
+	return nil
+}
+
 func (f *task) configure(config *connector.TaskConfig) {
+	f.signal = make(chan struct{})
+	defer func() {
+		f.consumeStates()
+		fmt.Println("done sync data...")
+		f.log.Trace(fireStoreLogPrefix, `sync latest states from kafka done`)
+		close(f.signal)
+	}()
 	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
 		Path:        `firestore_sink_connector_write_latency_microseconds`,
@@ -119,7 +206,7 @@ func (f *task) configure(config *connector.TaskConfig) {
 	conf = config.Connector.Configs[deleteOnNull]
 	if conf == nil {
 		f.set(deleteOnNull, false)
-	}else {
+	} else {
 		f.set(deleteOnNull, conf.(bool))
 	}
 	conf = config.Connector.Configs[pkMode]
@@ -131,7 +218,33 @@ func (f *task) configure(config *connector.TaskConfig) {
 		f.set(fmt.Sprintf(`pk/%s`, c), struct{}{})
 	}
 }
-func (f *task) Init(config *connector.TaskConfig) error {
+
+func (f *task) Init(config *connector.TaskConfig) (err error) {
+	f.syncTopic = fmt.Sprintf("__%v_%v", f.Name(), config.Connector.Name)
+	pCfg := producer.NewConfig()
+	cCfg := consumer.NewConsumerConfig()
+
+	bs := config.Connector.Configs[`consumer.bootstrap.servers`]
+	if bs != nil {
+		servers := strings.Split(bs.(string), ",")
+		pCfg.BootstrapServers = servers
+		cCfg.BootstrapServers = servers
+	}
+
+	f.producer, err = producer.NewProducer(pCfg)
+	if err != nil {
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector producer for state sync, please check bootstrap servers: %v", err))
+		return err
+	}
+
+	cCfg.GroupId = f.syncTopic
+	cCfg.Consumer.Offsets.Initial = int64(consumer.Earliest)
+	f.consumer, err = consumer.NewPartitionConsumer(cCfg)
+	if err != nil {
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector consumer for state sync, please check bootstrap servers: %v", err))
+		return err
+	}
+
 	f.configure(config)
 	ctx := context.Background()
 	var opt option.ClientOption
@@ -174,9 +287,10 @@ func (f *task) Stop() error {
 func (f *task) OnRebalanced() connector.ReBalanceHandler { return nil }
 
 func (f *task) Process(records []connector.Recode) error {
+	// wait till the init sync is done
+	<-f.signal
 	ctx := context.Background()
 	for _, rec := range records {
-		// single collections multiple topic mapping
 		err := f.store(ctx, rec)
 		if err != nil {
 			f.log.Error(fireStoreLogPrefix, err, rec.Key(), rec.Value())
@@ -191,6 +305,10 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	defer func() {
 		// sync state
 		f.syncState(rec.Key(), rec)
+		err := f.publishStates(ctx, rec)
+		if err != nil {
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync latetst state to kafka: %v", err))
+		}
 	}()
 	// topic collections mapping info
 	var err error
@@ -207,6 +325,7 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	}(time.Now())
 
 	mapCol := make(map[string]interface{})
+	tmpRec := rec
 	readyToDelete := false
 	if rec.Value() == nil {
 		val := f.getState(rec.Key())
@@ -250,6 +369,7 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 
 		// ready to delete
 		if readyToDelete && f.get(deleteOnNull).(bool) {
+			rec = tmpRec
 			_, err := docRef.Delete(ctx)
 			if err != nil {
 				return fmt.Errorf(fmt.Sprintf("could not delete from firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
