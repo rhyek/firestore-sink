@@ -62,15 +62,15 @@ func (f *fireConnector) Builder() connector.TaskBuilder {
 }
 
 type task struct {
-	log       connector.Logger
-	config    sync.Map
-	state     sync.Map
-	client    *firestore.Client
-	latency   metrics.Observer
-	syncTopic string
-	signal    chan struct{}
-	producer  producer.Producer
-	consumer  consumer.PartitionConsumer
+	log        connector.Logger
+	config     sync.Map
+	state      sync.Map
+	client     *firestore.Client
+	latency    metrics.Observer
+	syncTopic  string
+	upSyncDone chan struct{}
+	producer   producer.Producer
+	consumer   consumer.PartitionConsumer
 }
 
 var fireStoreLogPrefix = `FireStore Sink`
@@ -96,7 +96,7 @@ func (f *task) getState(key interface{}) interface{} {
 func (f *task) consumeStates() {
 	messages, err := f.consumer.Consume(f.syncTopic, 0, 0)
 	if err != nil {
-		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync data from kafka: %v", err))
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync data from sinker: %v", err))
 	}
 
 	for message := range messages {
@@ -152,13 +152,7 @@ func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 }
 
 func (f *task) configure(config *connector.TaskConfig) {
-	f.signal = make(chan struct{})
-	defer func() {
-		f.consumeStates()
-		fmt.Println("done sync data...")
-		f.log.Trace(fireStoreLogPrefix, `sync latest states from kafka done`)
-		close(f.signal)
-	}()
+	f.upSyncDone = make(chan struct{})
 	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
 		Path:        `firestore_sink_connector_write_latency_microseconds`,
@@ -220,30 +214,42 @@ func (f *task) configure(config *connector.TaskConfig) {
 }
 
 func (f *task) Init(config *connector.TaskConfig) (err error) {
-	f.syncTopic = fmt.Sprintf("__%v_%v", f.Name(), config.Connector.Name)
-	pCfg := producer.NewConfig()
-	cCfg := consumer.NewConsumerConfig()
+	// create this hassle only if delete on null is enabled
+	defer func() {
+		if !f.get(deleteOnNull).(bool) {
+			close(f.upSyncDone)
+			return
+		}
+		f.syncTopic = fmt.Sprintf("__%v_%v", f.Name(), config.Connector.Name)
+		pCfg := producer.NewConfig()
+		cCfg := consumer.NewConsumerConfig()
 
-	bs := config.Connector.Configs[`consumer.bootstrap.servers`]
-	if bs != nil {
-		servers := strings.Split(bs.(string), ",")
-		pCfg.BootstrapServers = servers
-		cCfg.BootstrapServers = servers
-	}
+		bs := config.Connector.Configs[`consumer.bootstrap.servers`]
+		if bs != nil {
+			servers := strings.Split(bs.(string), ",")
+			pCfg.BootstrapServers = servers
+			cCfg.BootstrapServers = servers
+		}
 
-	f.producer, err = producer.NewProducer(pCfg)
-	if err != nil {
-		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector producer for state sync, please check bootstrap servers: %v", err))
-		return err
-	}
+		f.producer, err = producer.NewProducer(pCfg)
+		if err != nil {
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector producer for state sync, please check bootstrap servers: %v", err))
+			return
+		}
 
-	cCfg.GroupId = f.syncTopic
-	cCfg.Consumer.Offsets.Initial = int64(consumer.Earliest)
-	f.consumer, err = consumer.NewPartitionConsumer(cCfg)
-	if err != nil {
-		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector consumer for state sync, please check bootstrap servers: %v", err))
-		return err
-	}
+		cCfg.GroupId = f.syncTopic
+		cCfg.Consumer.Offsets.Initial = int64(consumer.Earliest)
+		f.consumer, err = consumer.NewPartitionConsumer(cCfg)
+		if err != nil {
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector consumer for state sync, please check bootstrap servers: %v", err))
+			return
+		}
+
+		// start previous state syn
+		f.consumeStates()
+		f.log.Trace(fireStoreLogPrefix, `sync latest states from sinker done`)
+		close(f.upSyncDone)
+	}()
 
 	f.configure(config)
 	ctx := context.Background()
@@ -284,11 +290,13 @@ func (f *task) Stop() error {
 	return nil
 }
 
+// OnRebalanced not implemented
 func (f *task) OnRebalanced() connector.ReBalanceHandler { return nil }
 
+// Process used to do the synchronization (CRUD) for firestore
 func (f *task) Process(records []connector.Recode) error {
 	// wait till the init sync is done
-	<-f.signal
+	<-f.upSyncDone
 	ctx := context.Background()
 	for _, rec := range records {
 		err := f.store(ctx, rec)
@@ -303,11 +311,14 @@ func (f *task) Process(records []connector.Recode) error {
 
 func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	defer func() {
+		if !f.get(deleteOnNull).(bool) {
+			return
+		}
 		// sync state
 		f.syncState(rec.Key(), rec)
 		err := f.publishStates(ctx, rec)
 		if err != nil {
-			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync latetst state to kafka: %v", err))
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync latetst state to sink: %v", err))
 		}
 	}()
 	// topic collections mapping info
