@@ -3,7 +3,7 @@
 kafka-connect-firestore is a [Kafka Connector](http://kafka.apache.org/documentation.html#connect)
 for loading data to and from Kafka.
 
-# Development
+# Usage
 
 To build a development version you'll need a correct github.com/gmbyapa/kafka-connector worker version.
 
@@ -142,3 +142,33 @@ If collection wants to delete on `null` value use below config, default the conf
     }​
 }​
 ```
+
+### Development
+
+#### 1. Usage
+
+##### 1.1 Connector API (`connector.Connector`)
+
+* `Init(configs *Config) error`
+
+* `Name() string`
+
+* `Type() ConnectType`
+
+##### 1.2 Sink Task API (`connector.SinkTask`)
+
+* `Init(config *TaskConfig) error`
+
+* `Name() string`
+
+* `Start() error`
+
+* `Stop() error`
+
+* `OnRebalanced() ReBalanceHandler`
+
+* `Process([]Recode) error`
+
+#### 2. Build
+
+`go build -buildmode=plugin`
