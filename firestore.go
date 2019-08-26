@@ -75,24 +75,29 @@ type task struct {
 
 var fireStoreLogPrefix = `FireStore Sink`
 
+// get used to get config values
 func (f *task) get(key string) interface{} {
 	res, _ := f.config.Load(key)
 	return res
 }
 
+// get used to set config values
 func (f *task) set(key string, value interface{}) {
 	f.config.Store(key, value)
 }
 
+// syncState is used to keep local cache of previous status
 func (f *task) syncState(key, value interface{}) {
 	f.state.Store(key, value)
 }
 
+// getState is used to get local cache of previous status
 func (f *task) getState(key interface{}) interface{} {
 	value, _ := f.state.Load(key)
 	return value
 }
 
+// consumeStates is used to sink previous status from up stream, if connector crash happens or if new connector spawns
 func (f *task) consumeStates() {
 	messages, err := f.consumer.Consume(f.syncTopic, 0, 0)
 	if err != nil {
@@ -102,6 +107,7 @@ func (f *task) consumeStates() {
 	for message := range messages {
 		switch m := message.(type) {
 		case *consumer.PartitionEnd:
+			f.log.Trace(fireStoreLogPrefix, `sync latest states from sinker done`)
 			return
 		case *consumer.Record:
 			var key interface{}
@@ -122,6 +128,7 @@ func (f *task) consumeStates() {
 	}
 }
 
+// publishStates is used to sink previous status to up stream
 func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 	if rec == nil {
 		return fmt.Errorf("incomming record is nil")
@@ -131,11 +138,13 @@ func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 
 	key, err := json.Marshal(r.Key_)
 	if err != nil {
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not encode the json data key: %+v, err: %v", rec, err))
 		return err
 	}
 
 	value, err := json.Marshal(r)
 	if err != nil {
+		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not encode the json data value: %+v, err: %v", rec, err))
 		return err
 	}
 	if f.producer != nil {
@@ -151,7 +160,7 @@ func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 	return nil
 }
 
-func (f *task) configure(config *connector.TaskConfig) {
+func (f *task) validate(config *connector.TaskConfig) {
 	f.upSyncDone = make(chan struct{})
 	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
@@ -233,7 +242,7 @@ func (f *task) Init(config *connector.TaskConfig) (err error) {
 
 		f.producer, err = producer.NewProducer(pCfg)
 		if err != nil {
-			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector producer for state sync, please check bootstrap servers: %v", err))
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not initiate the connector producer for state sync, please check bootstrap servers: %v", err))
 			return
 		}
 
@@ -241,17 +250,16 @@ func (f *task) Init(config *connector.TaskConfig) (err error) {
 		cCfg.Consumer.Offsets.Initial = int64(consumer.Earliest)
 		f.consumer, err = consumer.NewPartitionConsumer(cCfg)
 		if err != nil {
-			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not iniitiate the connector consumer for state sync, please check bootstrap servers: %v", err))
+			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not initiate the connector consumer for state sync, please check bootstrap servers: %v", err))
 			return
 		}
 
-		// start previous state syn
+		// start previous state sync
 		f.consumeStates()
-		f.log.Trace(fireStoreLogPrefix, `sync latest states from sinker done`)
 		close(f.upSyncDone)
 	}()
 
-	f.configure(config)
+	f.validate(config)
 	ctx := context.Background()
 	var opt option.ClientOption
 	credFilePath := f.get(credentialsFilePath)
@@ -373,7 +381,6 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 			return fmt.Errorf("could not create firestore col for: %v", col)
 		}
 		_, err = docRef.Set(ctx, mapCol)
-
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 		}
@@ -393,7 +400,6 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	// if pk available
 	if pkCol != nil {
 		_, err = colRef.Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
-
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 		}
@@ -402,7 +408,6 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 
 	//if pk not available
 	_, err = colRef.NewDoc().Create(ctx, mapCol)
-
 	if err != nil {
 		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
 	}
