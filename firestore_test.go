@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+
+type taskBuilder struct{}
+
+func (t *taskBuilder) Build() (connector.Task, error) {
+	return new(task), nil
+}
+
 type rec struct {
 	topic string
 	key   interface{}
