@@ -25,6 +25,13 @@ const deleteOnNull = `firestore.delete.on.null.values`
 
 var Connector connector.Connector = new(fireConnector)
 
+
+type taskBuilder struct{}
+
+func (t *taskBuilder) Build() (connector.Task, error) {
+	return new(task), nil
+}
+
 type record struct {
 	Topic_     string      `json:"topic"`
 	Partition_ int32       `json:"partition"`
