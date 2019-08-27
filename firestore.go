@@ -414,6 +414,16 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 
 	// if pk available
 	if pkCol != nil {
+		if readyToDelete && f.get(deleteOnNull).(bool) {
+			docRef = colRef.Doc(rec.Key().(string))
+			rec = tmpRec
+			_, err := docRef.Delete(ctx)
+			if err != nil {
+				return fmt.Errorf(fmt.Sprintf("could not delete from firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+			}
+			f.log.Debug(fireStoreLogPrefix, fmt.Sprintf("firestore message delete done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+			return nil
+		}
 		_, err = colRef.Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
 		if err != nil {
 			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))

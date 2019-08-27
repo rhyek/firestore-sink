@@ -64,20 +64,24 @@ func TestFireStore_Sink_Write(t *testing.T) {
 	config.Connector.Configs[`firestore.credentials.file.path`] = `/home/noel/Dev/go_projects/src/github.com/noelyahan/kafka-connect/kafka-connect-firestore/test-budget-4f14aad07b9b.json`
 	config.Connector.Configs[`firestore.project.id`] = `test-budget-5529f`
 	config.Connector.Configs[`topics`] = `account,blah-t`
-	config.Connector.Configs[`firestore.collection.account`] = `accounts/${account_id}/goals/${goal_id}`
-	config.Connector.Configs[`firestore.topic.pk.collections`] = `accounts/${account_id}/goals/${goal_id}`
+	config.Connector.Configs[`firestore.collection.account`] = `accounts/${accountId}/clients`
+	config.Connector.Configs[`firestore.topic.pk.collections`] = `accounts/${accountId}/clients`
+
+	//config.Connector.Configs[`firestore.collection.account`] = `accounts/${accountId}/clients/${id}`
+	//config.Connector.Configs[`firestore.topic.pk.collections`] = `accounts/${accountId}/clients/${id}`
+
 	config.Connector.Configs[`firestore.delete.on.null.values`] = true
 	err := sink.Init(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	recs := make([]connector.Recode, 0)
-	recs = append(recs, rec{`account`, `111`, nil})
-	recs = append(recs, rec{`account`, `222`, nil})
-	recs = append(recs, rec{`account`, `333`, nil})
-	recs = append(recs, rec{`account`, `111`, `{"first":"Test 11","last":"Test","born":1111,"account_id":"a111","goal_id":"g111"}`})
-	recs = append(recs, rec{`account`, `222`, `{"first":"Test 2","last":"Test","born":1815,"account_id":"a111","goal_id":"g222"}`})
-	recs = append(recs, rec{`account`, `333`, `{"first":"Test 3","last":"Test","born":1815,"account_id":"a111","goal_id":"g333"}`})
+	//recs = append(recs, rec{`account`, `2ddca773-2d3d-4f00-8a63-11ba43a01293`, nil})
+	//recs = append(recs, rec{`account`, `a6dc1589-687a-4cfb-a381-909d437479a7`, nil})
+	//recs = append(recs, rec{`account`, `48e732bb-79bd-4410-984e-6d6db6b29db9`, nil})
+	recs = append(recs, rec{`account`, `2ddca773-2d3d-4f00-8a63-11ba43a01293`, `{"id":"2ddca773-2d3d-4f00-8a63-11ba43a01293","partyId":"xcd3aa19-b8ab-41ac-8b44-cf132d68328f","accountId":"3aea48e2-65d1-4db8-9443-63eaa04f4660","firstName":null,"lastName":null,"preferredName":null,"dateOfBirth":null,"gender":null,"email":null,"addresses":null,"phoneNumbers":null,"clientType":"CLIENT","livingArrangement":null,"dependantIds":[],"addressesSameAsPrimaryClient":true,"primaryClient":false}`})
+	recs = append(recs, rec{`account`, `a6dc1589-687a-4cfb-a381-909d437479a7`, `{"id":"a6dc1589-687a-4cfb-a381-909d437479a7","partyId":"xcd3aa19-b8ab-41ac-8b44-cf132d68328f","accountId":"3aea48e2-65d1-4db8-9443-63eaa04f4660","firstName":null,"lastName":null,"preferredName":null,"dateOfBirth":null,"gender":null,"email":null,"addresses":null,"phoneNumbers":null,"clientType":"CLIENT","livingArrangement":null,"dependantIds":[],"addressesSameAsPrimaryClient":true,"primaryClient":false}`})
+	recs = append(recs, rec{`account`, `48e732bb-79bd-4410-984e-6d6db6b29db9`, `{"id":"48e732bb-79bd-4410-984e-6d6db6b29db9","partyId":"xcd3aa19-b8ab-41ac-8b44-cf132d68328f","accountId":"3aea48e2-65d1-4db8-9443-63eaa04f4660","firstName":null,"lastName":null,"preferredName":null,"dateOfBirth":null,"gender":null,"email":null,"addresses":null,"phoneNumbers":null,"clientType":"CLIENT","livingArrangement":null,"dependantIds":[],"addressesSameAsPrimaryClient":true,"primaryClient":false}`})
 
 	err = sink.(connector.SinkTask).Process(recs)
 	if err != nil {
@@ -98,17 +102,21 @@ func TestFireStore_Sink_Delete(t *testing.T) {
 	config.Connector.Configs[`firestore.credentials.file.path`] = `/home/noel/Dev/go_projects/src/github.com/noelyahan/kafka-connect/kafka-connect-firestore/test-budget-4f14aad07b9b.json`
 	config.Connector.Configs[`firestore.project.id`] = `test-budget-5529f`
 	config.Connector.Configs[`topics`] = `account,blah-t`
-	config.Connector.Configs[`firestore.collection.account`] = `accounts/${account_id}/goals/${goal_id}`
-	config.Connector.Configs[`firestore.topic.pk.collections`] = `accounts/${account_id}/goals/${goal_id}`
+	config.Connector.Configs[`firestore.collection.account`] = `accounts/${accountId}/clients`
+	config.Connector.Configs[`firestore.topic.pk.collections`] = `accounts/${accountId}/clients`
+
+	//config.Connector.Configs[`firestore.collection.account`] = `accounts/${accountId}/clients/${id}`
+	//config.Connector.Configs[`firestore.topic.pk.collections`] = `accounts/${accountId}/clients/${id}`
+
 	config.Connector.Configs[`firestore.delete.on.null.values`] = true
 	err := sink.Init(config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	recs := make([]connector.Recode, 0)
-	recs = append(recs, rec{`account`, `111`, nil})
-	recs = append(recs, rec{`account`, `222`, nil})
-	recs = append(recs, rec{`account`, `333`, nil})
+	recs = append(recs, rec{`account`, `2ddca773-2d3d-4f00-8a63-11ba43a01293`, nil})
+	recs = append(recs, rec{`account`, `a6dc1589-687a-4cfb-a381-909d437479a7`, nil})
+	recs = append(recs, rec{`account`, `48e732bb-79bd-4410-984e-6d6db6b29db9`, nil})
 
 	err = sink.(connector.SinkTask).Process(recs)
 	if err != nil {
