@@ -324,20 +324,24 @@ func (f *task) Process(records []connector.Recode) error {
 	return nil
 }
 
+// TODO if value is not a JSON, just publish for the given collection if can
 func (f *task) store(ctx context.Context, rec connector.Recode) error {
-	defer func() {
+	var err error
+	defer func(err error) {
+		if err != nil {
+			return
+		}
 		if !f.get(deleteOnNull).(bool) {
 			return
 		}
 		// sync state
 		f.syncState(rec.Key(), rec)
-		err := f.publishStates(ctx, rec)
+		err = f.publishStates(ctx, rec)
 		if err != nil {
 			f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync latetst state to sink: %v", err))
 		}
-	}()
+	}(err)
 	// topic collections mapping info
-	var err error
 	col := f.get(rec.Topic())
 	if col == nil {
 		err = fmt.Errorf("firestore col not found \n")
@@ -363,6 +367,10 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	// if still previous state was empty and the first value is null cant sync
 	if rec.Value() == nil {
 		return fmt.Errorf(fmt.Sprintf("could sync the payload of null, no previous states to be mapped:, key: %v, value: %v", rec.Key(), rec.Value()))
+	}
+	if !isJSON(rec.Value()) {
+		err = fmt.Errorf("not a JSON value")
+		return err
 	}
 	err = json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
 	if err != nil {
@@ -454,4 +462,13 @@ func (f *task) getPathRefs(paths []string) (colRef *firestore.CollectionRef, doc
 
 func (f *task) Name() string {
 	return `firestore-sink-task`
+}
+
+func isJSON(v interface{}) bool {
+	// TODO v is a struct do it in different way
+	var jsonStr map[string]interface{}
+	s := fmt.Sprintf("%v", v)
+	b := []byte(s)
+	err := json.Unmarshal(b, &jsonStr)
+	return err == nil
 }
