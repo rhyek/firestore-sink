@@ -106,7 +106,7 @@ func (f *task) getState(key interface{}) interface{} {
 
 // consumeStates is used to sink previous status from up stream, if connector crash happens or if new connector spawns
 func (f *task) consumeStates() {
-	messages, err := f.consumer.Consume(f.syncTopic, 0, 0)
+	messages, err := f.consumer.Consume(f.syncTopic, 0, consumer.Earliest)
 	if err != nil {
 		f.log.Error(fireStoreLogPrefix, fmt.Sprintf("could not sync data from sinker: %v", err))
 	}
