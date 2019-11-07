@@ -229,25 +229,7 @@ func (f *task) validate(config *connector.TaskConfig) {
 }
 
 func (f *task) Init(config *connector.TaskConfig) (err error) {
-	l := config.Connector.Configs[`log.level`]
-	c := config.Connector.Configs[`log.color`]
-	p := config.Connector.Configs[`log.file_path`]
-	var level log.Level
-	var color, path bool
-	if l != nil {
-		level = log.Level(l.(string))
-	}
-	if c != nil {
-		color = c.(bool)
-	}
-	if p != nil {
-		path = p.(bool)
-	}
-	f.log = log.Constructor.Log(
-		log.WithLevel(level),
-		log.WithColors(color),
-		log.WithFilePath(path),
-	).NewLog(log.Prefixed(`firestore_sink`))
+	f.log = config.Logger.NewLog(log.Prefixed(`firestore_sink`))
 
 	// create this hassle only if delete on null is enabled
 	defer func() {
