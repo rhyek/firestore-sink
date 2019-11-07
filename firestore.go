@@ -12,7 +12,6 @@ import (
 	"github.com/pickme-go/metrics"
 	"github.com/tidwall/gjson"
 	"google.golang.org/api/option"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -231,7 +230,7 @@ func (f *task) validate(config *connector.TaskConfig) {
 
 func (f *task) Init(config *connector.TaskConfig) (err error) {
 	l := config.Connector.Configs[`log.level`]
-	c := config.Connector.Configs[`log.level`]
+	c := config.Connector.Configs[`log.color`]
 	p := config.Connector.Configs[`log.file_path`]
 	var level log.Level
 	var color, path bool
@@ -239,16 +238,10 @@ func (f *task) Init(config *connector.TaskConfig) (err error) {
 		level = log.Level(l.(string))
 	}
 	if c != nil {
-		color, err = strconv.ParseBool(c.(string))
-		if err != nil {
-			return err
-		}
+		color = c.(bool)
 	}
 	if p != nil {
-		path, err = strconv.ParseBool(p.(string))
-		if err != nil {
-			return err
-		}
+		path = p.(bool)
 	}
 	f.log = log.Constructor.Log(
 		log.WithLevel(level),

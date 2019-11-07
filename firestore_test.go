@@ -60,6 +60,9 @@ func TestFireStore_Sink_Write(t *testing.T) {
 	config.Connector.Name = `fire_store_sink_2`
 	config.Connector.Metrics = metrics.NoopReporter()
 	config.Connector.Configs = make(map[string]interface{})
+	config.Connector.Configs[`log.level`] = `TRACE`
+	config.Connector.Configs[`log.color`] = true
+	config.Connector.Configs[`log.file_path`] = true
 	config.Connector.Configs[`consumer.bootstrap.servers`] = `192.168.10.60:9092`
 	config.Connector.Configs[`firestore.credentials.file.path`] = `/home/noel/Dev/go_projects/src/github.com/noelyahan/kafka-connect/kafka-connect-firestore/test-budget-4f14aad07b9b.json`
 	config.Connector.Configs[`firestore.project.id`] = `test-budget-5529f`
