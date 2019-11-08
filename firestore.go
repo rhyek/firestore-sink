@@ -107,26 +107,26 @@ func (f *task) getState(key interface{}) interface{} {
 func (f *task) consumeStates() {
 	messages, err := f.consumer.Consume(f.syncTopic, 0, consumer.Earliest)
 	if err != nil {
-		f.log.Error(fmt.Sprintf("could not sync data from sinker: %v", err))
+		f.log.Error(fmt.Sprintf("could not sync data from sinker source: %v", err))
 	}
 
 	for message := range messages {
 		switch m := message.(type) {
 		case *consumer.PartitionEnd:
-			f.log.Trace(`sync latest states from sinker done`)
+			f.log.Trace(`done sync latest states from sinker source`)
 			return
 		case *consumer.Record:
 			var key interface{}
 			err := json.Unmarshal(m.Key, &key)
 			if err != nil {
-				f.log.Error(fmt.Sprintf("error on decoding key: %v", err))
+				f.log.Error(fmt.Sprintf("error on decoding key sinker source: %v", err))
 				continue
 			}
 
 			var rec record
 			err = json.Unmarshal(m.Value, &rec)
 			if err != nil {
-				f.log.Error(fmt.Sprintf("error on decoding key: %v", err))
+				f.log.Error(fmt.Sprintf("error on decoding key sinker source: %v", err))
 				continue
 			}
 			f.syncState(key, rec)
@@ -137,7 +137,7 @@ func (f *task) consumeStates() {
 // publishStates is used to sink previous status to up stream
 func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 	if rec == nil {
-		return fmt.Errorf("incomming record is nil")
+		return fmt.Errorf("current record is nil")
 	}
 	r := record{rec.Topic(), rec.Partition(),
 		rec.Offset(), rec.Key(), rec.Value(), rec.Timestamp()}
@@ -160,7 +160,7 @@ func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 			Topic: f.syncTopic,
 		})
 		if err != nil {
-			f.log.Error(fmt.Sprintf("could not produce sync data: %+v, err: %v", rec, err))
+			f.log.Error(fmt.Sprintf("could not produce to sinker source data: %+v, err: %v", rec, err))
 		}
 	}
 	return nil
@@ -168,7 +168,6 @@ func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 
 func (f *task) validate(config *connector.TaskConfig) {
 	f.upSyncDone = make(chan struct{})
-	f.log = config.Logger
 	f.latency = config.Connector.Metrics.Observer(metrics.MetricConf{
 		Path:        `firestore_sink_connector_write_latency_microseconds`,
 		Labels:      []string{`collections`},
@@ -320,12 +319,12 @@ func (f *task) Process(records []connector.Recode) error {
 			f.log.Error(err, rec.Key(), rec.Value())
 			continue
 		}
-		f.log.Trace(`record batch processed`, records)
+		f.log.Trace(`batch processed records: %+v`, records)
 	}
 	return nil
 }
 
-// TODO if value is not a JSON, just publish for the given collection if can
+// TODO if value is not a JSON, just publish for the given collection if can (Only JSON values are supported)
 func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	var err error
 	defer func(err error) {
@@ -367,10 +366,10 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	}
 	// if still previous state was empty and the first value is null cant sync
 	if rec.Value() == nil {
-		return fmt.Errorf(fmt.Sprintf("could sync the payload of null, no previous states to be mapped:, key: %v, value: %v", rec.Key(), rec.Value()))
+		return fmt.Errorf(fmt.Sprintf("current record is null and no previous states to be mapped the firestore collection path:, key: %+v, value: %+v", rec.Key(), rec.Value()))
 	}
 	if !isJSON(rec.Value()) {
-		err = fmt.Errorf("not a JSON value")
+		err = fmt.Errorf("record value is not a JSON value %+v", rec.Value())
 		return err
 	}
 	err = json.Unmarshal([]byte(rec.Value().(string)), &mapCol)
@@ -394,11 +393,11 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	// if pk available or not
 	if len(paths)%2 == 0 {
 		if docRef == nil {
-			return fmt.Errorf("could not create firestore col for: %v", col)
+			return fmt.Errorf("could not create the firestore col for: %v", col)
 		}
 		_, err = docRef.Set(ctx, mapCol)
 		if err != nil {
-			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+			return fmt.Errorf(fmt.Sprintf("could not store to the firestore: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 		}
 
 		// ready to delete
@@ -406,9 +405,9 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 			rec = tmpRec
 			_, err := docRef.Delete(ctx)
 			if err != nil {
-				return fmt.Errorf(fmt.Sprintf("could not delete from firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+				return fmt.Errorf(fmt.Sprintf("could not delete from the firestore: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 			}
-			f.log.Debug(fmt.Sprintf("firestore message delete done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+			f.log.Debug(fmt.Sprintf("firestore message delete done: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 		}
 		return nil
 	}
@@ -420,14 +419,14 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 			rec = tmpRec
 			_, err := docRef.Delete(ctx)
 			if err != nil {
-				return fmt.Errorf(fmt.Sprintf("could not delete from firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+				return fmt.Errorf(fmt.Sprintf("could not delete from the firestore: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 			}
-			f.log.Debug(fmt.Sprintf("firestore message delete done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+			f.log.Debug(fmt.Sprintf("firestore message delete done: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 			return nil
 		}
 		_, err = colRef.Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
 		if err != nil {
-			return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+			return fmt.Errorf(fmt.Sprintf("could not store to the firestore: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 		}
 		return nil
 	}
@@ -435,9 +434,9 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 	//if pk not available
 	_, err = colRef.NewDoc().Create(ctx, mapCol)
 	if err != nil {
-		return fmt.Errorf(fmt.Sprintf("could not store to firestore: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+		return fmt.Errorf(fmt.Sprintf("could not store to the firestore: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 	}
-	f.log.Debug(fmt.Sprintf("firestore message insert done: %v, key: %v, value: %v", err, rec.Key(), rec.Value()))
+	f.log.Debug(fmt.Sprintf("firestore message insert done: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 	return nil
 }
 
