@@ -24,15 +24,6 @@ const projectId = `firestore.project.id`
 const pkMode = `firestore.topic.pk.collections`
 const deleteOnNull = `firestore.delete.on.null.values`
 
-var Connector connector.Connector = new(fireConnector)
-
-
-type taskBuilder struct{}
-
-func (t *taskBuilder) Build() (connector.Task, error) {
-	return new(task), nil
-}
-
 type record struct {
 	Topic_     string      `json:"topic"`
 	Partition_ int32       `json:"partition"`
@@ -49,26 +40,6 @@ func (r record) Key() interface{}     { return r.Key_ }
 func (r record) Value() interface{}   { return r.Value_ }
 func (r record) Timestamp() time.Time { return r.Timestamp_ }
 
-type fireConnector struct{}
-
-var replacer = strings.NewReplacer("$", "", "{", "", "}", "")
-
-func (f *fireConnector) Init(configs *connector.Config) error {
-	return nil
-}
-
-func (f *fireConnector) Name() string {
-	return `firestore-connector`
-}
-
-func (f *fireConnector) Type() connector.ConnectType {
-	return connector.ConnectTypeSink
-}
-
-func (f *fireConnector) Builder() connector.TaskBuilder {
-	return new(taskBuilder)
-}
-
 type task struct {
 	log        log.Logger
 	config     sync.Map
@@ -81,23 +52,124 @@ type task struct {
 	consumer   consumer.PartitionConsumer
 }
 
-// get used to get config values
-func (f *task) get(key string) interface{} {
+func (f *task) Init(config *connector.TaskConfig) (err error) {
+	f.log = config.Logger.NewLog(log.Prefixed(`firestore_sink`))
+
+	// create this hassle only if delete on null is enabled
+	defer func() {
+		if !f.getConfig(deleteOnNull).(bool) {
+			close(f.upSyncDone)
+			return
+		}
+		f.syncTopic = fmt.Sprintf("__%v_%v", f.Name(), config.Connector.Name)
+		pCfg := producer.NewConfig()
+		cCfg := consumer.NewConsumerConfig()
+
+		bs := config.Connector.Configs[`consumer.bootstrap.servers`]
+		if bs != nil {
+			servers := strings.Split(bs.(string), ",")
+			pCfg.BootstrapServers = servers
+			cCfg.BootstrapServers = servers
+		}
+
+		f.producer, err = producer.NewProducer(pCfg)
+		if err != nil {
+			f.log.Error(fmt.Sprintf("could not initiate the connector producer for state sync, please check bootstrap servers: %v", err))
+			return
+		}
+
+		cCfg.GroupId = f.syncTopic
+		cCfg.Consumer.Offsets.Initial = int64(consumer.Earliest)
+		f.consumer, err = consumer.NewPartitionConsumer(cCfg)
+		if err != nil {
+			f.log.Error(fmt.Sprintf("could not initiate the connector consumer for state sync, please check bootstrap servers: %v", err))
+			return
+		}
+
+		// start previous state sync
+		f.consumeStates()
+		close(f.upSyncDone)
+	}()
+
+	f.validate(config)
+	ctx := context.Background()
+	var opt option.ClientOption
+	credFilePath := f.getConfig(credentialsFilePath)
+	credFileJSON := f.getConfig(credentialsFileJson)
+	if credFilePath != nil {
+		opt = option.WithCredentialsFile(credFilePath.(string))
+	} else if credFileJSON != nil {
+		b, err := json.Marshal(credFileJSON)
+		if err != nil {
+			f.log.Error(fmt.Sprintf("could not convert json firestore credentials"))
+			return err
+		}
+		opt = option.WithCredentialsJSON(b)
+	}
+	if opt == nil {
+		opt = option.WithoutAuthentication()
+	}
+	projectId := f.getConfig(projectId).(string)
+	client, err := firestore.NewClient(ctx, projectId, opt)
+	if err != nil {
+		f.log.Error(fmt.Sprintf("could not connect to firestore, error on creating a client: %v", err))
+		return err
+	}
+	f.client = client
+	return nil
+}
+func (f *task) Start() error {
+	return nil
+}
+func (f *task) Stop() error {
+	err := f.client.Close()
+	if err != nil {
+		f.log.Error(fmt.Sprintf("error on closinf the client: %v", err))
+		return err
+	}
+	return nil
+}
+
+// OnRebalanced not implemented
+func (f *task) OnRebalanced() connector.ReBalanceHandler { return nil }
+
+// Process used to do the synchronization (CRUD) for firestore
+func (f *task) Process(records []connector.Recode) error {
+	// wait till the init sync is done
+	<-f.upSyncDone
+	ctx := context.Background()
+	for _, rec := range records {
+		err := f.store(ctx, rec)
+		if err != nil {
+			f.log.Error(err, rec.Key(), rec.Value())
+			continue
+		}
+		f.log.Trace(`batch processed records: %+v`, records)
+	}
+	return nil
+}
+
+func (f *task) Name() string {
+	return `firestore-sink-task`
+}
+
+// getConfig used to getConfig config values
+func (f *task) getConfig(key string) interface{} {
 	res, _ := f.config.Load(key)
 	return res
 }
 
-// get used to set config values
-func (f *task) set(key string, value interface{}) {
+// getConfig used to setConfig config values
+func (f *task) setConfig(key string, value interface{}) {
 	f.config.Store(key, value)
 }
 
-// syncState is used to keep local cache of previous status
-func (f *task) syncState(key, value interface{}) {
+// setState is used to keep local cache of previous status
+func (f *task) setState(key, value interface{}) {
 	f.state.Store(key, value)
 }
 
-// getState is used to get local cache of previous status
+// getState is used to getConfig local cache of previous status
 func (f *task) getState(key interface{}) interface{} {
 	value, _ := f.state.Load(key)
 	return value
@@ -129,7 +201,7 @@ func (f *task) consumeStates() {
 				f.log.Error(fmt.Sprintf("error on decoding key sinker source: %v", err))
 				continue
 			}
-			f.syncState(key, rec)
+			f.setState(key, rec)
 		}
 	}
 }
@@ -179,24 +251,24 @@ func (f *task) validate(config *connector.TaskConfig) {
 		msg := fmt.Sprintf(`%v conifig canot be empty`, topics)
 		f.log.Error(msg)
 	}
-	f.set(topics, conf)
+	f.setConfig(topics, conf)
 
 	conf = config.Connector.Configs[credentialsFilePath]
-	f.set(credentialsFilePath, conf)
+	f.setConfig(credentialsFilePath, conf)
 
 	conf = config.Connector.Configs[credentialsFileJson]
 	if conf == nil && config.Connector.Configs[credentialsFilePath] == nil {
 		msg := fmt.Sprintf(`%v conifig canot be empty`, credentialsFileJson)
 		f.log.Error(msg)
 	}
-	f.set(credentialsFileJson, conf)
+	f.setConfig(credentialsFileJson, conf)
 
 	conf = config.Connector.Configs[projectId]
 	if conf == nil {
 		msg := fmt.Sprintf(`%v conifig could not be empty`, projectId)
 		f.log.Error(msg)
 	}
-	f.set(projectId, conf)
+	f.setConfig(projectId, conf)
 
 	// topics and collections mapping - optional
 	topics := strings.Split(config.Connector.Configs[topics].(string), ",")
@@ -207,15 +279,15 @@ func (f *task) validate(config *connector.TaskConfig) {
 
 		col := config.Connector.Configs[key]
 		if col != nil {
-			f.set(t, col.(string))
+			f.setConfig(t, col.(string))
 		}
 	}
 
 	conf = config.Connector.Configs[deleteOnNull]
 	if conf == nil {
-		f.set(deleteOnNull, false)
+		f.setConfig(deleteOnNull, false)
 	} else {
-		f.set(deleteOnNull, conf.(bool))
+		f.setConfig(deleteOnNull, conf.(bool))
 	}
 	conf = config.Connector.Configs[pkMode]
 	if conf == nil {
@@ -223,105 +295,8 @@ func (f *task) validate(config *connector.TaskConfig) {
 	}
 	pkCols := strings.Split(conf.(string), ",")
 	for _, c := range pkCols {
-		f.set(fmt.Sprintf(`pk/%s`, c), struct{}{})
+		f.setConfig(fmt.Sprintf(`pk/%s`, c), struct{}{})
 	}
-}
-
-func (f *task) Init(config *connector.TaskConfig) (err error) {
-	f.log = config.Logger.NewLog(log.Prefixed(`firestore_sink`))
-
-	// create this hassle only if delete on null is enabled
-	defer func() {
-		if !f.get(deleteOnNull).(bool) {
-			close(f.upSyncDone)
-			return
-		}
-		f.syncTopic = fmt.Sprintf("__%v_%v", f.Name(), config.Connector.Name)
-		pCfg := producer.NewConfig()
-		cCfg := consumer.NewConsumerConfig()
-
-		bs := config.Connector.Configs[`consumer.bootstrap.servers`]
-		if bs != nil {
-			servers := strings.Split(bs.(string), ",")
-			pCfg.BootstrapServers = servers
-			cCfg.BootstrapServers = servers
-		}
-
-		f.producer, err = producer.NewProducer(pCfg)
-		if err != nil {
-			f.log.Error(fmt.Sprintf("could not initiate the connector producer for state sync, please check bootstrap servers: %v", err))
-			return
-		}
-
-		cCfg.GroupId = f.syncTopic
-		cCfg.Consumer.Offsets.Initial = int64(consumer.Earliest)
-		f.consumer, err = consumer.NewPartitionConsumer(cCfg)
-		if err != nil {
-			f.log.Error(fmt.Sprintf("could not initiate the connector consumer for state sync, please check bootstrap servers: %v", err))
-			return
-		}
-
-		// start previous state sync
-		f.consumeStates()
-		close(f.upSyncDone)
-	}()
-
-	f.validate(config)
-	ctx := context.Background()
-	var opt option.ClientOption
-	credFilePath := f.get(credentialsFilePath)
-	credFileJSON := f.get(credentialsFileJson)
-	if credFilePath != nil {
-		opt = option.WithCredentialsFile(credFilePath.(string))
-	} else if credFileJSON != nil {
-		b, err := json.Marshal(credFileJSON)
-		if err != nil {
-			f.log.Error(fmt.Sprintf("could not convert json firestore credentials"))
-			return err
-		}
-		opt = option.WithCredentialsJSON(b)
-	}
-	if opt == nil {
-		opt = option.WithoutAuthentication()
-	}
-	projectId := f.get(projectId).(string)
-	client, err := firestore.NewClient(ctx, projectId, opt)
-	if err != nil {
-		f.log.Error(fmt.Sprintf("could not connect to firestore, error on creating a client: %v", err))
-		return err
-	}
-	f.client = client
-	return nil
-}
-func (f *task) Start() error {
-	return nil
-}
-func (f *task) Stop() error {
-	err := f.client.Close()
-	if err != nil {
-		f.log.Error(fmt.Sprintf("error on closinf the client: %v", err))
-		return err
-	}
-	return nil
-}
-
-// OnRebalanced not implemented
-func (f *task) OnRebalanced() connector.ReBalanceHandler { return nil }
-
-// Process used to do the synchronization (CRUD) for firestore
-func (f *task) Process(records []connector.Recode) error {
-	// wait till the init sync is done
-	<-f.upSyncDone
-	ctx := context.Background()
-	for _, rec := range records {
-		err := f.store(ctx, rec)
-		if err != nil {
-			f.log.Error(err, rec.Key(), rec.Value())
-			continue
-		}
-		f.log.Trace(`batch processed records: %+v`, records)
-	}
-	return nil
 }
 
 // TODO if value is not a JSON, just publish for the given collection if can (Only JSON values are supported)
@@ -331,18 +306,18 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		if err != nil {
 			return
 		}
-		if !f.get(deleteOnNull).(bool) {
+		if !f.getConfig(deleteOnNull).(bool) {
 			return
 		}
 		// sync state
-		f.syncState(rec.Key(), rec)
+		f.setState(rec.Key(), rec)
 		err = f.publishStates(ctx, rec)
 		if err != nil {
 			f.log.Error(fmt.Sprintf("could not sync latetst state to sink: %v", err))
 		}
 	}(err)
 	// topic collections mapping info
-	col := f.get(rec.Topic())
+	col := f.getConfig(rec.Topic())
 	if col == nil {
 		err = fmt.Errorf("firestore col not found \n")
 		return err
@@ -379,7 +354,7 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 
 	paths := strings.Split(col.(string), "/")
 
-	pkCol := f.get(fmt.Sprintf(`pk/%s`, col.(string)))
+	pkCol := f.getConfig(fmt.Sprintf(`pk/%s`, col.(string)))
 	// replace col path template from payload path
 	col = f.getCollPath(paths, rec.Value().(string))
 
@@ -401,7 +376,7 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 		}
 
 		// ready to delete
-		if readyToDelete && f.get(deleteOnNull).(bool) {
+		if readyToDelete && f.getConfig(deleteOnNull).(bool) {
 			rec = tmpRec
 			_, err := docRef.Delete(ctx)
 			if err != nil {
@@ -414,7 +389,7 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 
 	// if pk available
 	if pkCol != nil {
-		if readyToDelete && f.get(deleteOnNull).(bool) {
+		if readyToDelete && f.getConfig(deleteOnNull).(bool) {
 			docRef = colRef.Doc(rec.Key().(string))
 			rec = tmpRec
 			_, err := docRef.Delete(ctx)
@@ -468,10 +443,6 @@ func (f *task) getPathRefs(paths []string) (colRef *firestore.CollectionRef, doc
 		docRef = colRef.Doc(p)
 	}
 	return
-}
-
-func (f *task) Name() string {
-	return `firestore-sink-task`
 }
 
 func isJSON(v interface{}) bool {
