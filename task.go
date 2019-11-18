@@ -24,6 +24,8 @@ const projectId = `firestore.project.id`
 const pkMode = `firestore.topic.pk.collections`
 const deleteOnNull = `firestore.delete.on.null.values`
 
+var replacer = strings.NewReplacer("$", "", "{", "", "}", "")
+
 type record struct {
 	Topic_     string      `json:"topic"`
 	Partition_ int32       `json:"partition"`
@@ -284,9 +286,8 @@ func (f *task) validate(config *connector.TaskConfig) {
 	}
 
 	conf = config.Connector.Configs[deleteOnNull]
-	if conf == nil {
-		f.setConfig(deleteOnNull, false)
-	} else {
+	f.setConfig(deleteOnNull, false)
+	if conf != nil {
 		f.setConfig(deleteOnNull, conf.(bool))
 	}
 	conf = config.Connector.Configs[pkMode]

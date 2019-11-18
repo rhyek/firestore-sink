@@ -2,14 +2,11 @@ package main
 
 import (
 	"bitbucket.org/mybudget-dev/stream-connect-worker/connector"
-	"strings"
 )
 
 var Connector connector.Connector = new(fireConnector)
 
 type fireConnector struct{}
-
-var replacer = strings.NewReplacer("$", "", "{", "", "}", "")
 
 func (f *fireConnector) Init(configs *connector.Config) error {
 	return nil
