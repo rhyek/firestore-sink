@@ -228,7 +228,10 @@ func (f *task) validate(config *connector.TaskConfig) {
 }
 
 func (f *task) Init(config *connector.TaskConfig) (err error) {
-	f.log = config.Logger.NewLog(log.Prefixed(`firestore_sink`))
+	f.log = config.Logger.NewLog(
+		log.WithColors(config.Connector.Configs[`log.colors`].(bool)),
+		log.WithLevel(log.Level(config.Connector.Configs[`log.level`].(string))),
+		log.Prefixed(`firestore_sink`))
 
 	// create this hassle only if delete on null is enabled
 	defer func() {
@@ -319,7 +322,7 @@ func (f *task) Process(records []connector.Recode) error {
 			f.log.Error(err, rec.Key(), rec.Value())
 			continue
 		}
-		f.log.Trace(`batch processed records: %+v`, records)
+		f.log.Trace(fmt.Sprintf(`batch processed records: %+v`, rec))
 	}
 	return nil
 }
