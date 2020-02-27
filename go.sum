@@ -91,6 +91,8 @@ github.com/pickme-go/k-stream v0.0.2-beta h1:ca5RjxfjN0G0ZWoHf0AEwpf6pbvKdeqaQ7M
 github.com/pickme-go/k-stream v0.0.2-beta/go.mod h1:hlvj1nsNjPgT+Gcax0Q+C3SYl2afH98wDWd4wGIV4mk=
 github.com/pickme-go/k-stream v0.0.2-beta-1 h1:s5Nwt4dDkxTlyG8bckqV3a+QXU0BEWXCtnzheXUaXr4=
 github.com/pickme-go/k-stream v0.0.2-beta-1/go.mod h1:hlvj1nsNjPgT+Gcax0Q+C3SYl2afH98wDWd4wGIV4mk=
+github.com/pickme-go/k-stream v0.0.2-beta-2 h1:QfMxVz2AaIOce3Jw28t6Dwy77l2DZodvJBLJLtIjpr4=
+github.com/pickme-go/k-stream v0.0.2-beta-2/go.mod h1:hlvj1nsNjPgT+Gcax0Q+C3SYl2afH98wDWd4wGIV4mk=
 github.com/pickme-go/log v0.0.0-20190728170724-c4afde9591cd h1:H6xks6s9B5g/5VNZMb6Teii4fnNAdMfoFjO2u+adH7I=
 github.com/pickme-go/log v0.0.0-20190728170724-c4afde9591cd/go.mod h1:7k8BN/9rsPLQwDNRI2iQ8aLO/Lm0WAIa0p+TBWYVor8=
 github.com/pickme-go/metrics v0.0.0-20190728171738-15b951580a8e h1:vSzTPwspo6dOa7yVCx0MJUAeX3osBwFeis2Ku9Ua6qI=

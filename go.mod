@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go v0.43.0
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kr/pretty v0.2.0 // indirect
-	github.com/pickme-go/k-stream v0.0.2-beta-1
+	github.com/pickme-go/k-stream v0.0.2-beta-2
 	github.com/pickme-go/log v0.0.0-20190728170724-c4afde9591cd
 	github.com/pickme-go/metrics v0.0.0-20190728171738-15b951580a8e
 	github.com/tidwall/gjson v1.3.2
