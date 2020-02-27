@@ -427,10 +427,19 @@ func (f *task) store(ctx context.Context, rec connector.Recode) error {
 			f.log.Debug(fmt.Sprintf("firestore message delete done: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
 			return nil
 		}
-		_, err = colRef.Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
-		if err != nil {
-			return fmt.Errorf(fmt.Sprintf("could not store to the firestore: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
+		// retry
+		for i := 0; i < 10; i++ {
+			_, err = colRef.Doc(fmt.Sprintf("%v", rec.Key())).Set(ctx, mapCol)
+			if err == nil {
+				break
+			}
+			if err != nil {
+				f.log.Error(fmt.Sprintf("could not store to the firestore: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
+			}
+			f.log.Debug(fmt.Sprintf("retrying the firestore record: %v, key: %+v, value: %+v", err, rec.Key(), rec.Value()))
+			time.Sleep(2 * time.Second)
 		}
+
 		return nil
 	}
 
