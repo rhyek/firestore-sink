@@ -7,9 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pickme-go/k-stream/consumer"
+	"github.com/pickme-go/k-stream/data"
 	"github.com/pickme-go/k-stream/producer"
-	"github.com/pickme-go/log"
-	"github.com/pickme-go/metrics"
+	"github.com/pickme-go/log/v2"
+	"github.com/pickme-go/metrics/v2"
 	"github.com/tidwall/gjson"
 	"google.golang.org/api/option"
 	"strings"
@@ -25,7 +26,6 @@ const pkMode = `firestore.topic.pk.collections`
 const deleteOnNull = `firestore.delete.on.null.values`
 
 var Connector connector.Connector = new(fireConnector)
-
 
 type taskBuilder struct{}
 
@@ -115,7 +115,7 @@ func (f *task) consumeStates() {
 		case *consumer.PartitionEnd:
 			f.log.Trace(`done sync latest states from sinker source`)
 			return
-		case *consumer.Record:
+		case *data.Record:
 			var key interface{}
 			err := json.Unmarshal(m.Key, &key)
 			if err != nil {
@@ -154,7 +154,7 @@ func (f *task) publishStates(ctx context.Context, rec connector.Recode) error {
 		return err
 	}
 	if f.producer != nil {
-		_, _, err = f.producer.Produce(ctx, &consumer.Record{
+		_, _, err = f.producer.Produce(ctx, &data.Record{
 			Key:   key,
 			Value: value,
 			Topic: f.syncTopic,
